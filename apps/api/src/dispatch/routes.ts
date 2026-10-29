@@ -29,6 +29,7 @@ export async function dispatchRoutes(app: FastifyInstance, { db }: Deps): Promis
       if (!ctx) return reply.code(404).send({ error: 'no_verified_vehicle' });
       if (ctx.blocked) return reply.code(403).send({ error: 'blocked' });
       if (!ctx.subscribed) return reply.code(402).send({ error: 'subscription_required' });
+      if (ctx.pausedUntil) return reply.code(423).send({ error: 'paused', pausedUntil: ctx.pausedUntil });
 
       // A driver who never set a price works at the recommended tariff. Store it as
       // version 0 so every offer points at a concrete tariff row.
@@ -69,12 +70,14 @@ export async function dispatchRoutes(app: FastifyInstance, { db }: Deps): Promis
       `SELECT r.id AS "rideId", o.id AS "offerId", o.price_tiyin::int AS "priceTiyin", o.expires_at AS "expiresAt",
               r.route_distance_m AS "distanceM", r.route_duration_s AS "durationS", r.options,
               r.driver_comment AS comment,
+              CASE WHEN pu.rating_count >= 5 THEN pu.rating::float END AS "passengerRating",
               (SELECT json_agg(json_build_object('position', s.position, 'lat', ST_Y(s.point::geometry),
                                                  'lng', ST_X(s.point::geometry), 'address', s.address)
                                ORDER BY s.position)
                  FROM ride_stops s WHERE s.ride_id = r.id) AS stops
          FROM ride_offers o
          JOIN rides r ON r.id = o.ride_id
+         JOIN users pu ON pu.id = r.passenger_id
          JOIN drivers d ON d.id = o.driver_id
         WHERE d.user_id = $1 AND o.status = 'chosen' AND o.expires_at > now() AND r.status = 'created'
         ORDER BY o.expires_at`,

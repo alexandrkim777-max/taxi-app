@@ -30,8 +30,16 @@ export function pickupMin(distanceM: number): number {
   return Math.max(1, Math.ceil((distanceM * 1.35) / ((22_000 / 60))));
 }
 
-export function offerScore(priceTiyin: number, distanceM: number): number {
-  return priceTiyin + pickupMin(distanceM) * TIYIN_PER_PICKUP_MIN;
+/**
+ * Each rating point below 5.0 is weighed like 2 000 sum, so with similar prices and pickup a
+ * better-rated driver gets the order first (4.5 -> +1 000 sum, 4.0 -> +2 000 sum). Drivers with
+ * fewer than 5 ratings are not penalised.
+ */
+const TIYIN_PER_RATING_POINT = 200_000;
+
+export function offerScore(priceTiyin: number, distanceM: number, rating: number | null = null): number {
+  const ratingPenalty = rating === null ? 0 : Math.max(0, 5 - rating) * TIYIN_PER_RATING_POINT;
+  return priceTiyin + pickupMin(distanceM) * TIYIN_PER_PICKUP_MIN + ratingPenalty;
 }
 
 export interface ClassPricing {
@@ -44,6 +52,7 @@ export interface PricedDriver {
   driverId: string;
   tariffId: string;
   distanceM: number;
+  rating: number | null;
   priceTiyin: number;
 }
 
@@ -60,6 +69,7 @@ export async function pricedDrivers(
     driverId: d.driverId,
     tariffId: d.tariffId,
     distanceM: d.distanceM,
+    rating: d.rating,
     priceTiyin: clampToCorridor(fareTiyin(d, opts.route), reference, opts.cls.corridor),
   }));
 }
@@ -68,7 +78,7 @@ export async function pricedDrivers(
 export function bestOf(drivers: PricedDriver[]): PricedDriver | null {
   let best: PricedDriver | null = null;
   for (const d of drivers) {
-    if (!best || offerScore(d.priceTiyin, d.distanceM) < offerScore(best.priceTiyin, best.distanceM)) best = d;
+    if (!best || offerScore(d.priceTiyin, d.distanceM, d.rating) < offerScore(best.priceTiyin, best.distanceM, best.rating)) best = d;
   }
   return best;
 }
@@ -177,9 +187,11 @@ export async function assignNext(tx: pg.PoolClient, rideId: string): Promise<Ass
   if (live.rows.length) return 'already_sent';
 
   const candidates = async () =>
-    tx.query<{ id: string; driver_id: string; price_tiyin: string; distance_m: number }>(
-      `SELECT o.id, o.driver_id, o.price_tiyin, ST_Distance(p.point, s.point)::int AS distance_m
+    tx.query<{ id: string; driver_id: string; price_tiyin: string; distance_m: number; rating: number | null }>(
+      `SELECT o.id, o.driver_id, o.price_tiyin, ST_Distance(p.point, s.point)::int AS distance_m,
+              CASE WHEN d.rating_count >= 5 THEN d.rating::float END AS rating
          FROM ride_offers o
+         JOIN drivers d ON d.id = o.driver_id AND (d.paused_until IS NULL OR d.paused_until <= now())
          JOIN driver_presence p ON p.driver_id = o.driver_id
          JOIN ride_stops s ON s.ride_id = o.ride_id AND s.position = 0
         WHERE o.ride_id = $1 AND o.status = 'open' AND o.expires_at > now()
@@ -205,7 +217,8 @@ export async function assignNext(tx: pg.PoolClient, rideId: string): Promise<Ass
     return 'needs_confirmation';
   }
 
-  affordable.sort((a, b) => offerScore(Number(a.price_tiyin), a.distance_m) - offerScore(Number(b.price_tiyin), b.distance_m));
+  affordable.sort((a, b) =>
+    offerScore(Number(a.price_tiyin), a.distance_m, a.rating) - offerScore(Number(b.price_tiyin), b.distance_m, b.rating));
   for (const pick of affordable) {
     if (!(await reserveDriver(tx, pick.driver_id))) continue;
     await tx.query(

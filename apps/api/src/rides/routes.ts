@@ -15,10 +15,10 @@ import { canTransition, clampToCorridor, fareTiyin, type RideStatus } from '@tax
 import { requireUser } from '../auth/session.ts';
 import type { RouteProvider } from '../routing/index.ts';
 import { uuidParams } from '../lib/geo.ts';
-import { cancelTerms, ARRIVAL_RADIUS_M } from './cancellation.ts';
+import { cancelTerms, ARRIVAL_RADIUS_M, waitingOf } from './cancellation.ts';
 import { isBlocked, openOffers, rideFor, rideOptions, rideView, stop, UUID, type RideRow, type Role } from './common.ts';
 import { HttpError, isUniqueViolation, withTx } from '../lib/tx.ts';
-import { driverContext, PRESENCE_TTL_SEC, setPresenceStatus } from '../dispatch/presence.ts';
+import { driverContext, pauseIfCancellingTooOften, PRESENCE_TTL_SEC, setPresenceStatus } from '../dispatch/presence.ts';
 import {
   ACCEPT_WINDOW_SEC, assignNext, expireLapsed, logEvent, refreshOffers, reserveDriver, SEARCH_WINDOW_SEC,
 } from '../dispatch/matching.ts';
@@ -283,6 +283,7 @@ export async function rideRoutes(app: FastifyInstance, { db, routes, cityCode }:
           if (!ctx) throw new HttpError(404, 'not_found');
           if (ctx.blocked) throw new HttpError(403, 'blocked');
           if (!ctx.subscribed) throw new HttpError(402, 'subscription_required');
+          if (ctx.pausedUntil) throw new HttpError(423, 'paused', { pausedUntil: ctx.pausedUntil });
 
           const { rows: rides } = await tx.query<RideRow>(
             `SELECT id, status FROM rides WHERE id = $1 AND deleted_at IS NULL FOR UPDATE`,
@@ -307,6 +308,7 @@ export async function rideRoutes(app: FastifyInstance, { db, routes, cityCode }:
               WHERE id = $1`,
             [ride.id, ctx.driverId, ctx.vehicleId, offer.price_tiyin, offer.tariff_id],
           );
+          await tx.query(`UPDATE ride_offers SET status = 'accepted' WHERE id = $1`, [offer.id]);
           await tx.query(
             `UPDATE ride_offers SET status = 'expired'
               WHERE status IN ('open', 'chosen') AND id <> $3 AND (ride_id = $1 OR driver_id = $2)`,
@@ -386,6 +388,26 @@ export async function rideRoutes(app: FastifyInstance, { db, routes, cityCode }:
             throw new HttpError(409, 'not_at_pickup', { distanceM, maxDistanceM: ARRIVAL_RADIUS_M });
           }
         }
+        if (next === 'in_progress') {
+          // Paid waiting (after the free minutes) is added to the price when the trip starts.
+          const waiting = await waitingOf(tx, ride.id);
+          if (waiting && waiting.accruedTiyin > 0) {
+            const { rows } = await tx.query<{ price: string }>(
+              `UPDATE rides SET locked_price_tiyin = locked_price_tiyin + $2 WHERE id = $1
+               RETURNING locked_price_tiyin AS price`,
+              [ride.id, waiting.accruedTiyin],
+            );
+            const newPrice = Number(rows[0]!.price);
+            await tx.query(
+              `INSERT INTO price_changes (ride_id, reason, amount_tiyin, old_price_tiyin, new_price_tiyin, wait_paid_min)
+               VALUES ($1, 'waiting', $2, $3, $4, $5)`,
+              [ride.id, waiting.accruedTiyin, newPrice - waiting.accruedTiyin, newPrice, waiting.paidMinutes],
+            );
+            await logEvent(tx, ride.id, 'waiting_charged', 'system', null, {
+              paidMinutes: waiting.paidMinutes, amountTiyin: waiting.accruedTiyin,
+            });
+          }
+        }
         await tx.query(`UPDATE rides SET status = $2 WHERE id = $1`, [ride.id, next]);
         if (next === 'completed') await setPresenceStatus(tx, ride.driver_id!, 'online');
         await logEvent(tx, ride.id, `status:${next}`, 'driver', userId, { from: ride.status });
@@ -444,9 +466,11 @@ export async function rideRoutes(app: FastifyInstance, { db, routes, cityCode }:
         if (!terms.allowed) {
           throw new HttpError(409, 'too_early_for_no_show', { noShowFrom: terms.noShowFrom });
         }
-        // The passenger is never charged a fee they did not see and accept.
-        if (role === 'passenger' && terms.feeTiyin > 0 && body.acceptFeeTiyin !== terms.feeTiyin) {
-          throw new HttpError(409, 'fee_confirmation_required', { feeTiyin: terms.feeTiyin });
+        // The passenger is never charged more than they saw and accepted. Waiting keeps ticking
+        // between the screen and the tap, so the accepted amount is a ceiling: we charge the
+        // current fee if it is at or below it, otherwise ask again.
+        if (role === 'passenger' && terms.feeTiyin > 0 && (body.acceptFeeTiyin ?? -1) < terms.feeTiyin) {
+          throw new HttpError(409, 'fee_confirmation_required', { feeTiyin: terms.feeTiyin, breakdown: terms.breakdown });
         }
         // A no-show is accepted only from a driver still at the pickup (as Yandex requires),
         // not from one who already drove off.
@@ -473,10 +497,13 @@ export async function rideRoutes(app: FastifyInstance, { db, routes, cityCode }:
           `UPDATE ride_offers SET status = 'expired' WHERE ride_id = $1 AND status IN ('open', 'chosen')`,
           [ride.id],
         );
-        if (ride.driver_id) await setPresenceStatus(tx, ride.driver_id, 'online');
         await logEvent(tx, ride.id, 'status:cancelled', role, userId, {
           from: ride.status, feeTiyin: fee ?? 0, noShow: body.noShow ?? false,
         });
+        if (ride.driver_id) {
+          const paused = role === 'driver' && !body.noShow && (await pauseIfCancellingTooOften(tx, ride.driver_id));
+          if (!paused) await setPresenceStatus(tx, ride.driver_id, 'online');
+        }
       });
       return rideView(db, request.params.id, role);
     },

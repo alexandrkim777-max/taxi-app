@@ -67,8 +67,10 @@ Tests: `npm test` (the API integration tests need a migrated database at `DATABA
 | POST | `/rides/:id/accept` | chosen driver | Accepts; the offer price is locked into the ride |
 | POST | `/rides/:id/decline` | chosen driver | Declines; one-tap rides go straight to the next driver |
 | POST | `/rides/:id/status` | assigned driver | `driver_en_route` → `arrived` → `in_progress` → `completed` |
-| GET | `/rides/:id/cancel-terms` | participants | What cancelling now costs (free before the driver arrives) |
-| POST | `/rides/:id/cancel` | passenger or driver | Before the trip starts; after arrival the passenger confirms the fee, the driver may cancel as `noShow` after 5 min |
+| GET | `/rides/:id/cancel-terms` | participants | What cancelling now costs, with breakdown (fee + waiting) |
+| POST | `/rides/:id/cancel` | passenger or driver | Before the trip starts; the passenger confirms any fee (`acceptFeeTiyin`), the driver may cancel as `noShow` after 5 min |
+| POST | `/rides/:id/rating` | participants | 1–5 after a completed ride (reason required below 4), once, within 72 h |
+| GET | `/me/ratings` | user | Own averages (shown after 5 ratings), completed and cancelled rides |
 | GET | `/rides/:id` | participants | Ride, stops, offers or assigned driver with live position |
 | GET | `/rides/active` | user | Current ride, to restore the app after a restart |
 | POST | `/rides/:id/route/preview` | passenger | New price for added / removed / changed stops; nothing changes yet |
@@ -110,12 +112,16 @@ so they can move to Redis when load requires it without touching the ride logic.
 
 ## Principles (see the product spec)
 
-- Ride price is locked at acceptance. It changes **only** when the passenger adds, removes or changes
-  a stop and confirms the new price: no waiting charges, no driver surcharges (enforced by the database).
+- Ride price is locked at acceptance. It changes **only** through (a) the passenger adding, removing or
+  changing a stop and confirming the new price, or (b) paid waiting at the pickup: 2 free minutes, then the
+  published class rate per minute (economy 500 sum), at most 30 minutes, shown live as a counter.
+  No surge, no driver surcharges (enforced by the database).
 - Disputes: both sides write what happened independently; a moderator decides with the ride log at hand.
-- Cancellation is free until the driver is at the pickup. After that a fixed class fee of 5 000–10 000 sum
-  goes to the driver (passenger cancels, or no-show after 5 min of waiting). The fee is shown and confirmed
-  first; a moderator can waive it in a dispute.
+- Cancellation, like Yandex: free for 3 minutes after the driver accepts; then half the class fee while the
+  driver is on the way; at the pickup the full fee (5 000–10 000 sum) plus paid waiting. A driver can cancel
+  as a no-show after 5 minutes at the pickup. The passenger confirms the amount first.
+- Ratings both ways after every ride; better-rated drivers get one-tap orders first; drivers who cancel
+  3 rides within 2 hours are paused for 30 minutes.
 - Driver tariffs are versioned; old versions are never deleted.
 - Nothing is hard-deleted: rows carry `deleted_at`.
 - Ride status changes only through allowed transitions; every change is written to `ride_events`.

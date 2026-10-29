@@ -12,6 +12,7 @@ import { dispatchRoutes } from './dispatch/routes.ts';
 import { rideRoutes } from './rides/routes.ts';
 import { routeChangeRoutes } from './rides/changes.ts';
 import { disputeRoutes } from './disputes/routes.ts';
+import { ratingRoutes } from './ratings/routes.ts';
 
 export interface AppDeps {
   db: pg.Pool;
@@ -70,5 +71,6 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
   await app.register(rideRoutes, { db: deps.db, routes: deps.routes, cityCode: deps.cityCode });
   await app.register(routeChangeRoutes, { db: deps.db, routes: deps.routes });
   await app.register(disputeRoutes, { db: deps.db });
+  await app.register(ratingRoutes, { db: deps.db });
   return app;
 }

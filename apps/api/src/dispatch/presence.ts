@@ -23,6 +23,8 @@ export interface DriverContext {
   classId: string;
   subscribed: boolean;
   blocked: boolean;
+  /** Set while the driver is paused for cancelling too often. */
+  pausedUntil: string | null;
 }
 
 export async function driverContext(q: Q, userId: string): Promise<DriverContext | null> {
@@ -33,7 +35,8 @@ export async function driverContext(q: Q, userId: string): Promise<DriverContext
                        AND s.starts_at <= now() AND s.ends_at > now()) AS subscribed,
             EXISTS (SELECT 1 FROM blocks b
                      WHERE b.user_id = d.user_id AND b.appeal_status <> 'lifted'
-                       AND (b.until IS NULL OR b.until > now())) AS blocked
+                       AND (b.until IS NULL OR b.until > now())) AS blocked,
+            CASE WHEN d.paused_until > now() THEN d.paused_until END AS "pausedUntil"
        FROM drivers d
        JOIN vehicles v ON v.driver_id = d.id AND v.is_active AND v.deleted_at IS NULL AND v.class_id IS NOT NULL
       WHERE d.user_id = $1 AND d.status = 'verified' AND d.deleted_at IS NULL
@@ -95,6 +98,8 @@ export async function setPresenceStatus(q: Q, driverId: string, status: 'online'
 export interface NearbyDriver {
   driverId: string;
   distanceM: number;
+  /** Average rating, or null while the driver has fewer than 5 ratings. */
+  rating: number | null;
   tariffId: string;
   baseTiyin: number;
   perKmTiyin: number;
@@ -115,6 +120,7 @@ export async function nearbyDrivers(
     `WITH pickup AS (SELECT ST_SetSRID(ST_MakePoint($2, $1), 4326)::geography AS point)
      SELECT p.driver_id AS "driverId",
             ST_Distance(p.point, pickup.point)::int AS "distanceM",
+            CASE WHEN d.rating_count >= 5 THEN d.rating::float END AS rating,
             t.id AS "tariffId",
             t.base_tiyin::int AS "baseTiyin", t.per_km_tiyin::int AS "perKmTiyin",
             t.per_min_tiyin::int AS "perMinTiyin", t.min_fare_tiyin::int AS "minFareTiyin"
@@ -131,6 +137,7 @@ export async function nearbyDrivers(
         AND p.updated_at > now() - make_interval(secs => $6)
         AND ST_DWithin(p.point, pickup.point, LEAST(d.pickup_radius_m, $7))
         AND d.status = 'verified' AND d.deleted_at IS NULL
+        AND (d.paused_until IS NULL OR d.paused_until <= now())
         AND d.user_id <> $4
         AND EXISTS (SELECT 1 FROM subscriptions s
                      WHERE s.driver_id = d.id AND s.status = 'active'
@@ -143,4 +150,28 @@ export async function nearbyDrivers(
     [opts.lat, opts.lng, opts.classId, opts.excludeUserId, opts.limit, PRESENCE_TTL_SEC, MAX_PICKUP_RADIUS_M],
   );
   return rows;
+}
+
+/** Own cancellations (not no-shows) within this window that trigger a pause. */
+export const CANCEL_PAUSE_LIMIT = 3;
+export const CANCEL_PAUSE_WINDOW_HOURS = 2;
+export const CANCEL_PAUSE_MIN = 30;
+
+/**
+ * Like Yandex's activity rules: a driver who cancels accepted rides too often (3 in 2 hours,
+ * no-shows excluded) is taken off the line for 30 minutes. Call after logging the cancellation.
+ */
+export async function pauseIfCancellingTooOften(q: Q, driverId: string): Promise<boolean> {
+  const { rows } = await q.query<{ n: number }>(
+    `SELECT count(*)::int AS n
+       FROM ride_events e JOIN rides r ON r.id = e.ride_id
+      WHERE r.driver_id = $1 AND e.type = 'status:cancelled' AND e.actor = 'driver'
+        AND NOT coalesce((e.payload->>'noShow')::boolean, false)
+        AND e.at > now() - make_interval(hours => $2)`,
+    [driverId, CANCEL_PAUSE_WINDOW_HOURS],
+  );
+  if (rows[0]!.n < CANCEL_PAUSE_LIMIT) return false;
+  await q.query(`UPDATE drivers SET paused_until = now() + make_interval(mins => $2) WHERE id = $1`, [driverId, CANCEL_PAUSE_MIN]);
+  await q.query(`DELETE FROM driver_presence WHERE driver_id = $1`, [driverId]);
+  return true;
 }

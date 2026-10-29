@@ -78,3 +78,13 @@ export async function drive(s: Setup, driver: Headers, rideId: string, statuses:
     assert.equal(res.statusCode, 200, `${status}: ${res.body}`);
   }
 }
+
+/**
+ * Takes drivers left online by earlier tests off the map and closes their still-searching rides,
+ * so the dispatcher's picks in the next test are predictable.
+ */
+export async function clearMap(): Promise<void> {
+  await db.query(`UPDATE driver_presence SET updated_at = now() - interval '10 minutes'`);
+  await db.query(`UPDATE ride_offers SET status = 'expired' WHERE status IN ('open', 'chosen')`);
+  await db.query(`UPDATE rides SET status = 'cancelled', cancelled_by = 'system', cancel_reason = 'test_cleanup' WHERE status = 'created'`);
+}

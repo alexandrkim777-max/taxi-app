@@ -5,7 +5,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { db, randomPhone, setup, skip, verifiedDriver, type Setup } from './helpers.ts';
-import { acceptedRide, createRide, drive, north, offerOf, onlineDriver, passenger, randomSpot, type Headers } from './rideHelpers.ts';
+import { acceptedRide, clearMap, createRide, drive, north, offerOf, onlineDriver, passenger, randomSpot, type Headers } from './rideHelpers.ts';
 import { dispatchTick } from '../src/dispatch/matching.ts';
 
 test('full ride: offer, choice, acceptance with locked price, status flow', { skip }, async () => {
@@ -275,16 +275,6 @@ test('races: parallel orders and parallel acceptances', { skip }, async () => {
 
 // ---------------------------------------------------------------------------
 // One-tap ordering (auto mode)
-
-/**
- * Takes drivers left online by earlier tests off the map and closes their still-searching rides,
- * so the dispatcher's picks in the next test are predictable.
- */
-async function clearMap(): Promise<void> {
-  await db.query(`UPDATE driver_presence SET updated_at = now() - interval '10 minutes'`);
-  await db.query(`UPDATE ride_offers SET status = 'expired' WHERE status IN ('open', 'chosen')`);
-  await db.query(`UPDATE rides SET status = 'cancelled', cancelled_by = 'system', cancel_reason = 'test_cleanup' WHERE status = 'created'`);
-}
 
 async function setFloorTariff(s: Setup, driver: Headers): Promise<void> {
   const t = (await s.app.inject({ method: 'GET', url: '/drivers/me/tariff', headers: driver })).json();

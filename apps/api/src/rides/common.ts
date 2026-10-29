@@ -5,6 +5,7 @@ import type { RideStatus } from '@taxi/shared';
 import { UZ_LAT, UZ_LNG } from '../lib/geo.ts';
 import { HttpError } from '../lib/tx.ts';
 import { pickupMin } from '../dispatch/matching.ts';
+import { waitingOf } from './cancellation.ts';
 
 export type Q = pg.Pool | pg.PoolClient;
 
@@ -77,7 +78,7 @@ export async function rideFor(q: Q, rideId: string, userId: string, lock: boolea
 export async function openOffers(q: Q, rideId: string) {
   const { rows } = await q.query(
     `SELECT o.id, o.status, o.price_tiyin::int AS "priceTiyin", o.expires_at AS "expiresAt",
-            u.name AS "driverName", d.rating::float AS rating,
+            u.name AS "driverName", CASE WHEN d.rating_count >= 5 THEN d.rating::float END AS rating,
             v.make_model AS "makeModel", v.color,
             (round(ST_Distance(p.point, s.point) / 100) * 100)::int AS "distanceM"
        FROM ride_offers o
@@ -103,7 +104,8 @@ export async function rideView(q: Q, rideId: string, role: Role) {
             r.cancel_reason AS "cancelReason", r.cancel_fee_tiyin::int AS "cancelFeeTiyin",
             r.cancel_fee_status AS "cancelFeeStatus", r.created_at AS "createdAt",
             r.driver_id, pu.name AS "passengerName",
-            du.name AS "driverName", d.rating::float AS "driverRating",
+            du.name AS "driverName", CASE WHEN d.rating_count >= 5 THEN d.rating::float END AS "driverRating",
+            CASE WHEN pu.rating_count >= 5 THEN pu.rating::float END AS "passengerRating",
             v.make_model AS "makeModel", v.color, v.plate,
             ST_Y(p.point::geometry) AS "driverLat", ST_X(p.point::geometry) AS "driverLng",
             p.heading AS "driverHeading", p.updated_at AS "driverSeenAt",
@@ -155,6 +157,17 @@ export async function rideView(q: Q, rideId: string, role: Role) {
         : null,
     };
   }
-  if (role === 'driver') view.passenger = { name: r.passengerName };
+  if (role === 'driver') view.passenger = { name: r.passengerName, rating: r.passengerRating };
+  // Waiting at the pickup: a live counter while the driver waits, then what was charged.
+  if (r.status === 'arrived') {
+    view.waiting = await waitingOf(q, rideId);
+  } else if (r.status === 'in_progress' || r.status === 'completed') {
+    const w = await q.query(
+      `SELECT wait_paid_min AS "paidMinutes", amount_tiyin::int AS "chargedTiyin"
+         FROM price_changes WHERE ride_id = $1 AND reason = 'waiting'`,
+      [rideId],
+    );
+    view.waiting = w.rows[0] ?? null;
+  }
   return view;
 }

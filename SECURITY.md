@@ -70,14 +70,20 @@ every item below has a regression test in `apps/api/test/security.test.ts` or th
   Moderation endpoints require `admin`. Statement text is stored as written — clients must render it
   as plain text, never as HTML.
 
-## Cancellation fee
+## Waiting, cancellation and ratings
 
-- 'Arrived' is accepted only when the driver's fresh live position is within 50 m of the pickup,
-  so a driver cannot start the paid-cancellation clock from elsewhere.
-- No-show only by the driver, only after 5 minutes at the pickup (measured from the logged arrival),
-  and only while the driver is still within 50 m of it.
-- The passenger is charged only after confirming the exact fee returned by `cancel-terms`.
-- Fee amounts are limited to 5 000–10 000 sum by a database check; waiving needs a moderator decision.
+- 'Arrived' is accepted only when the driver's fresh live position is within 200 m of the pickup,
+  so a driver cannot start the waiting meter or the cancellation fee from elsewhere. Refused attempts
+  are logged with the distance.
+- Waiting is computed on the server from logged event times (arrival, trip start), never from the client;
+  capped at 30 paid minutes. Rates are bounded by database checks.
+- No-show only by the driver, only after 5 minutes at the pickup, and only while still within 200 m of it.
+- The passenger is charged a cancellation fee only after confirming an amount at or above the current fee;
+  fee amounts are limited to 5 000–10 000 sum by a database check; waiving needs a moderator decision.
+- A driver who cancels 3 accepted rides within 2 hours (no-shows excluded) is paused for 30 minutes and
+  removed from the map; paused drivers are skipped by dispatch and cannot accept.
+- Ratings: participants only, completed rides only, once per side, 72 h window, reason required below 4,
+  no self-rating. Only averages are exposed (after 5 ratings); authors, single scores and reasons are not.
 
 ## Errors
 

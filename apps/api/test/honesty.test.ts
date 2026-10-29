@@ -4,7 +4,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { db, randomPhone, setup, skip, type Setup } from './helpers.ts';
-import { acceptedRide, createRide, drive, north, passenger, type Headers } from './rideHelpers.ts';
+import { acceptedRide, createRide, drive, north, offerOf, passenger, type Headers } from './rideHelpers.ts';
 
 type Point = { lat: number; lng: number };
 
@@ -126,8 +126,13 @@ test('route changes are capped per ride', { skip }, async () => {
 test('the database refuses any other reason for a price change', { skip }, async () => {
   const { rows } = await db.query(`SELECT id FROM rides LIMIT 1`);
   await assert.rejects(
-    db.query(`INSERT INTO price_changes (ride_id, reason, amount_tiyin) VALUES ($1, 'waiting', 500000)`, [rows[0].id]),
+    db.query(`INSERT INTO price_changes (ride_id, reason, amount_tiyin, confirmed_by_passenger) VALUES ($1, 'surge', 500000, true)`, [rows[0].id]),
     /price_changes_reason_check/,
+  );
+  // A route change is never stored without the passenger's confirmation.
+  await assert.rejects(
+    db.query(`INSERT INTO price_changes (ride_id, reason, amount_tiyin) VALUES ($1, 'stop_added', 500000)`, [rows[0].id]),
+    /price_changes_confirmation/,
   );
 });
 
@@ -245,58 +250,100 @@ test('dispute timing: silent side, late opening, rides without a driver', { skip
 });
 
 // ---------------------------------------------------------------------------
-// Paid cancellation after the driver is at the pickup
+// Waiting and cancellation (Yandex-style)
 
-test('cancel: free before arrival, fee after, shown and confirmed first', { skip }, async () => {
+/** Moves a logged event back in time, to simulate minutes passing. */
+async function ago(rideId: string, type: string, minutes: number): Promise<void> {
+  await db.query(
+    `UPDATE ride_events SET at = now() - make_interval(secs => $3) WHERE ride_id = $1 AND type = $2`,
+    [rideId, type, Math.round(minutes * 60)],
+  );
+}
+
+test('cancel on the way: free for 3 minutes, then half the fee', { skip }, async () => {
   const s = await setup();
-
-  // Before arrival: free.
-  const free = await acceptedRide(s);
-  await drive(s, free.driver, free.rideId, ['driver_en_route']);
-  const t0 = (await s.app.inject({ method: 'GET', url: `/rides/${free.rideId}/cancel-terms`, headers: free.pax })).json();
-  assert.deepEqual(t0, { allowed: true, feeTiyin: 0 });
-  const c0 = await s.app.inject({ method: 'POST', url: `/rides/${free.rideId}/cancel`, headers: free.pax, payload: {} });
-  assert.equal(c0.statusCode, 200);
-  assert.equal(c0.json().cancelFee, null);
-
-  // "Arrived" far from the pickup is refused, so drivers cannot farm fees.
   const r = await acceptedRide(s);
   await drive(s, r.driver, r.rideId, ['driver_en_route']);
-  await s.app.inject({ method: 'POST', url: '/drivers/me/location', headers: r.driver, payload: north(r.spot, 1000) });
-  const fake = await s.app.inject({ method: 'POST', url: `/rides/${r.rideId}/status`, headers: r.driver, payload: { status: 'arrived' } });
-  assert.equal(fake.statusCode, 409);
-  assert.equal(fake.json().error, 'not_at_pickup');
-  // 80 m away is still too far (limit 50 m); the app is told how far.
-  await s.app.inject({ method: 'POST', url: '/drivers/me/location', headers: r.driver, payload: north(r.spot, 80) });
-  const close = await s.app.inject({ method: 'POST', url: `/rides/${r.rideId}/status`, headers: r.driver, payload: { status: 'arrived' } });
-  assert.equal(close.statusCode, 409);
-  assert.ok(close.json().distanceM >= 75 && close.json().distanceM <= 85, close.body);
-  assert.equal(close.json().maxDistanceM, 50);
-  // 40 m away is fine.
-  await s.app.inject({ method: 'POST', url: '/drivers/me/location', headers: r.driver, payload: north(r.spot, 40) });
-  const near = await s.app.inject({ method: 'POST', url: `/rides/${r.rideId}/status`, headers: r.driver, payload: { status: 'arrived' } });
-  assert.equal(near.statusCode, 200, near.body);
+  const t0 = (await s.app.inject({ method: 'GET', url: `/rides/${r.rideId}/cancel-terms`, headers: r.pax })).json();
+  assert.equal(t0.feeTiyin, 0);
+  assert.ok(t0.freeUntil, 'the app can show "free until"');
 
-  const terms = (await s.app.inject({ method: 'GET', url: `/rides/${r.rideId}/cancel-terms`, headers: r.pax })).json();
-  assert.equal(terms.feeTiyin, 500_000, 'economy: 5 000 sum');
+  await ago(r.rideId, 'status:accepted', 4);
+  const t1 = (await s.app.inject({ method: 'GET', url: `/rides/${r.rideId}/cancel-terms`, headers: r.pax })).json();
+  assert.equal(t1.feeTiyin, 250_000, 'economy: half of 5 000 sum');
 
-  // Without confirming the exact fee nothing happens.
   const unconfirmed = await s.app.inject({ method: 'POST', url: `/rides/${r.rideId}/cancel`, headers: r.pax, payload: {} });
   assert.equal(unconfirmed.statusCode, 409);
-  assert.equal(unconfirmed.json().feeTiyin, 500_000);
-  const wrong = await s.app.inject({ method: 'POST', url: `/rides/${r.rideId}/cancel`, headers: r.pax, payload: { acceptFeeTiyin: 100 } });
-  assert.equal(wrong.statusCode, 409);
-  assert.equal((await s.app.inject({ method: 'GET', url: `/rides/${r.rideId}`, headers: r.pax })).json().status, 'arrived');
-
-  const paid = await s.app.inject({ method: 'POST', url: `/rides/${r.rideId}/cancel`, headers: r.pax, payload: { acceptFeeTiyin: 500_000 } });
-  assert.equal(paid.statusCode, 200, paid.body);
-  assert.deepEqual(paid.json().cancelFee, { amountTiyin: 500_000, status: 'pending' });
-  // The ride price itself is untouched.
-  assert.equal(paid.json().priceTiyin, r.offer.priceTiyin);
+  assert.equal(unconfirmed.json().feeTiyin, 250_000);
+  const ok = await s.app.inject({ method: 'POST', url: `/rides/${r.rideId}/cancel`, headers: r.pax, payload: { acceptFeeTiyin: 250_000 } });
+  assert.equal(ok.statusCode, 200, ok.body);
+  assert.deepEqual(ok.json().cancelFee, { amountTiyin: 250_000, status: 'pending' });
   await s.app.close();
 });
 
-test('cancel: driver no-show only after waiting 5 minutes; plain driver cancel is free', { skip }, async () => {
+test('arrival within 200 m; cancel at the pickup = fee + paid waiting', { skip }, async () => {
+  const s = await setup();
+  const r = await acceptedRide(s);
+  await drive(s, r.driver, r.rideId, ['driver_en_route']);
+
+  // "Arrived" far from the pickup is refused, so drivers cannot farm fees; the app is told how far.
+  await s.app.inject({ method: 'POST', url: '/drivers/me/location', headers: r.driver, payload: north(r.spot, 300) });
+  const far = await s.app.inject({ method: 'POST', url: `/rides/${r.rideId}/status`, headers: r.driver, payload: { status: 'arrived' } });
+  assert.equal(far.statusCode, 409);
+  assert.equal(far.json().error, 'not_at_pickup');
+  assert.ok(far.json().distanceM >= 290 && far.json().distanceM <= 310, far.body);
+  assert.equal(far.json().maxDistanceM, 200);
+  await s.app.inject({ method: 'POST', url: '/drivers/me/location', headers: r.driver, payload: north(r.spot, 150) });
+  const near = await s.app.inject({ method: 'POST', url: `/rides/${r.rideId}/status`, headers: r.driver, payload: { status: 'arrived' } });
+  assert.equal(near.statusCode, 200, near.body);
+
+  // Free waiting for 2 minutes.
+  let view = (await s.app.inject({ method: 'GET', url: `/rides/${r.rideId}`, headers: r.pax })).json();
+  assert.equal(view.waiting.paidMinutes, 0);
+  assert.equal(view.waiting.ratePerMinTiyin, 50_000, 'economy: 500 sum per minute');
+  const t0 = (await s.app.inject({ method: 'GET', url: `/rides/${r.rideId}/cancel-terms`, headers: r.pax })).json();
+  assert.equal(t0.feeTiyin, 500_000);
+
+  // 4.5 minutes in: 2 paid minutes.
+  await ago(r.rideId, 'status:arrived', 4.5);
+  view = (await s.app.inject({ method: 'GET', url: `/rides/${r.rideId}`, headers: r.driver })).json();
+  assert.equal(view.waiting.paidMinutes, 2);
+  assert.equal(view.waiting.accruedTiyin, 100_000);
+  const t1 = (await s.app.inject({ method: 'GET', url: `/rides/${r.rideId}/cancel-terms`, headers: r.pax })).json();
+  assert.deepEqual(t1.breakdown, { cancelTiyin: 500_000, waitingTiyin: 100_000 });
+
+  // Confirming an older, lower amount is not enough; a higher ceiling charges the actual fee.
+  const stale = await s.app.inject({ method: 'POST', url: `/rides/${r.rideId}/cancel`, headers: r.pax, payload: { acceptFeeTiyin: 500_000 } });
+  assert.equal(stale.statusCode, 409);
+  const paid = await s.app.inject({ method: 'POST', url: `/rides/${r.rideId}/cancel`, headers: r.pax, payload: { acceptFeeTiyin: 650_000 } });
+  assert.equal(paid.statusCode, 200, paid.body);
+  assert.equal(paid.json().cancelFee.amountTiyin, 600_000);
+  assert.equal(paid.json().priceTiyin, r.offer.priceTiyin, 'the ride price itself is untouched');
+  await s.app.close();
+});
+
+test('paid waiting is added to the price when the trip starts, capped at 30 minutes', { skip }, async () => {
+  const s = await setup();
+  const r = await acceptedRide(s);
+  await drive(s, r.driver, r.rideId, ['driver_en_route', 'arrived']);
+  await ago(r.rideId, 'status:arrived', 5.2); // 3 paid minutes
+  await drive(s, r.driver, r.rideId, ['in_progress']);
+  const view = (await s.app.inject({ method: 'GET', url: `/rides/${r.rideId}`, headers: r.pax })).json();
+  assert.equal(view.priceTiyin, r.offer.priceTiyin + 150_000);
+  assert.deepEqual(view.waiting, { paidMinutes: 3, chargedTiyin: 150_000 });
+  const history = (await s.app.inject({ method: 'GET', url: `/rides/${r.rideId}/price-changes`, headers: r.pax })).json();
+  assert.equal(history[0].reason, 'waiting');
+
+  const r2 = await acceptedRide(s);
+  await drive(s, r2.driver, r2.rideId, ['driver_en_route', 'arrived']);
+  await ago(r2.rideId, 'status:arrived', 90);
+  await drive(s, r2.driver, r2.rideId, ['in_progress']);
+  const v2 = (await s.app.inject({ method: 'GET', url: `/rides/${r2.rideId}`, headers: r2.pax })).json();
+  assert.equal(v2.waiting.paidMinutes, 30, 'never more than 30 paid minutes');
+  await s.app.close();
+});
+
+test('no-show: after 5 minutes, still at the pickup; plain driver cancel is free', { skip }, async () => {
   const s = await setup();
   const r = await acceptedRide(s);
   await drive(s, r.driver, r.rideId, ['driver_en_route', 'arrived']);
@@ -305,12 +352,10 @@ test('cancel: driver no-show only after waiting 5 minutes; plain driver cancel i
   assert.equal(early.statusCode, 409);
   assert.equal(early.json().error, 'too_early_for_no_show');
   assert.ok(early.json().noShowFrom);
-
-  // A passenger cannot claim a no-show.
   const paxNoShow = await s.app.inject({ method: 'POST', url: `/rides/${r.rideId}/cancel`, headers: r.pax, payload: { noShow: true } });
-  assert.equal(paxNoShow.statusCode, 400);
+  assert.equal(paxNoShow.statusCode, 400, 'a passenger cannot claim a no-show');
 
-  await db.query(`UPDATE ride_events SET at = now() - interval '6 minutes' WHERE ride_id = $1 AND type = 'status:arrived'`, [r.rideId]);
+  await ago(r.rideId, 'status:arrived', 6); // 4 paid minutes
   // Driving off and then claiming a no-show does not work.
   await s.app.inject({ method: 'POST', url: '/drivers/me/location', headers: r.driver, payload: north(r.spot, 500) });
   const gone = await s.app.inject({ method: 'POST', url: `/rides/${r.rideId}/cancel`, headers: r.driver, payload: { noShow: true } });
@@ -320,9 +365,8 @@ test('cancel: driver no-show only after waiting 5 minutes; plain driver cancel i
   const noShow = await s.app.inject({ method: 'POST', url: `/rides/${r.rideId}/cancel`, headers: r.driver, payload: { noShow: true } });
   assert.equal(noShow.statusCode, 200, noShow.body);
   assert.equal(noShow.json().cancelReason, 'no_show');
-  assert.equal(noShow.json().cancelFee.amountTiyin, 500_000);
+  assert.equal(noShow.json().cancelFee.amountTiyin, 500_000 + 4 * 50_000);
 
-  // The driver cancels at the pickup for another reason: the passenger pays nothing.
   const r2 = await acceptedRide(s);
   await drive(s, r2.driver, r2.rideId, ['driver_en_route', 'arrived']);
   const plain = await s.app.inject({ method: 'POST', url: `/rides/${r2.rideId}/cancel`, headers: r2.driver, payload: { reason: 'flat tyre' } });
@@ -330,6 +374,36 @@ test('cancel: driver no-show only after waiting 5 minutes; plain driver cancel i
   assert.equal(plain.json().cancelFee, null);
   await s.app.close();
 });
+
+test('a driver who cancels 3 rides within 2 hours is paused for 30 minutes', { skip }, async () => {
+  const s = await setup();
+  const first = await acceptedRide(s);
+  const driver = first.driver;
+  const driverId = (await s.app.inject({ method: 'GET', url: '/drivers/me', headers: driver })).json().id;
+  for (let i = 0; i < 3; i++) {
+    const rideId = i === 0 ? first.rideId : await acceptRideFor(s, driver, first.spot);
+    const res = await s.app.inject({ method: 'POST', url: `/rides/${rideId}/cancel`, headers: driver, payload: { reason: 'changed my mind' } });
+    assert.equal(res.statusCode, 200, res.body);
+  }
+  const online = await s.app.inject({ method: 'POST', url: '/drivers/me/online', headers: driver, payload: first.spot });
+  assert.equal(online.statusCode, 423);
+  assert.ok(online.json().pausedUntil);
+  const presence = await db.query(`SELECT 1 FROM driver_presence WHERE driver_id = $1`, [driverId]);
+  assert.equal(presence.rows.length, 0, 'taken off the map');
+  await s.app.close();
+});
+
+/** A new passenger orders near the given spot and the given driver accepts. */
+async function acceptRideFor(s: Setup, driver: Headers, spot: Point): Promise<string> {
+  await s.app.inject({ method: 'POST', url: '/drivers/me/location', headers: driver, payload: north(spot, 100) });
+  const pax = await passenger(s);
+  const ride = (await createRide(s, pax, spot)).json();
+  const offer = await offerOf(s, ride, driver);
+  await s.app.inject({ method: 'POST', url: `/rides/${ride.id}/choose`, headers: pax, payload: { offerId: offer.id } });
+  const res = await s.app.inject({ method: 'POST', url: `/rides/${ride.id}/accept`, headers: driver });
+  assert.equal(res.statusCode, 200, res.body);
+  return ride.id;
+}
 
 test('cancel fee: class amounts stay within 5 000–10 000 sum; a moderator can waive it', { skip }, async () => {
   const fees = await db.query(`SELECT code, cancel_fee_tiyin::int AS fee FROM vehicle_classes ORDER BY fee`);
@@ -339,7 +413,7 @@ test('cancel fee: class amounts stay within 5 000–10 000 sum; a moderator can 
   const s = await setup();
   const r = await acceptedRide(s);
   await drive(s, r.driver, r.rideId, ['driver_en_route', 'arrived']);
-  await s.app.inject({ method: 'POST', url: `/rides/${r.rideId}/cancel`, headers: r.pax, payload: { acceptFeeTiyin: 500_000 } });
+  await s.app.inject({ method: 'POST', url: `/rides/${r.rideId}/cancel`, headers: r.pax, payload: { acceptFeeTiyin: 1_000_000 } });
 
   // The passenger says the driver was at the wrong entrance; the driver disagrees.
   const opened = await s.app.inject({
