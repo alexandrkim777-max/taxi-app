@@ -103,6 +103,7 @@ export async function rideView(q: Q, rideId: string, role: Role) {
             r.options, r.driver_comment AS comment, r.cancelled_by AS "cancelledBy",
             r.cancel_reason AS "cancelReason", r.cancel_fee_tiyin::int AS "cancelFeeTiyin",
             r.cancel_fee_status AS "cancelFeeStatus", r.created_at AS "createdAt",
+            r.payment_method AS "paymentMethod", r.payment_status AS "paymentStatus",
             r.driver_id, pu.name AS "passengerName",
             du.name AS "driverName", CASE WHEN d.rating_count >= 5 THEN d.rating::float END AS "driverRating",
             CASE WHEN pu.rating_count >= 5 THEN pu.rating::float END AS "passengerRating",
@@ -133,6 +134,7 @@ export async function rideView(q: Q, rideId: string, role: Role) {
     stops: stops.rows, options: r.options, comment: r.comment,
     cancelledBy: r.cancelledBy, cancelReason: r.cancelReason,
     cancelFee: r.cancelFeeTiyin ? { amountTiyin: r.cancelFeeTiyin, status: r.cancelFeeStatus } : null,
+    payment: { method: r.paymentMethod, status: r.paymentStatus },
     createdAt: r.createdAt,
   };
   if (r.status === 'created' && role === 'passenger') {

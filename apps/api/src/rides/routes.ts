@@ -14,6 +14,7 @@ import type pg from 'pg';
 import { canTransition, clampToCorridor, fareTiyin, type RideStatus } from '@taxi/shared';
 import { requireUser } from '../auth/session.ts';
 import type { RouteProvider } from '../routing/index.ts';
+import type { PaymentService } from '../payments/service.ts';
 import { uuidParams } from '../lib/geo.ts';
 import { cancelTerms, ARRIVAL_RADIUS_M, waitingOf } from './cancellation.ts';
 import { isBlocked, openOffers, rideFor, rideOptions, rideView, stop, UUID, type RideRow, type Role } from './common.ts';
@@ -27,6 +28,7 @@ interface Deps {
   db: pg.Pool;
   routes: RouteProvider;
   cityCode: string;
+  payments: PaymentService;
 }
 
 /** Anti-spam: rides a passenger can create per hour (each one pings drivers). */
@@ -38,12 +40,44 @@ interface CreateBody {
   mode?: 'auto' | 'choose';
   /** Auto mode: the price the passenger saw and agreed to; nobody more expensive is sent. */
   maxPriceTiyin?: number;
+  paymentMethod?: 'cash' | 'card';
+  cardId?: string;
   options?: Record<string, boolean>;
   comment?: string;
 }
 
 
-export async function rideRoutes(app: FastifyInstance, { db, routes, cityCode }: Deps): Promise<void> {
+export async function rideRoutes(app: FastifyInstance, { db, routes, cityCode, payments }: Deps): Promise<void> {
+  /** Card rides: charge the fare (incl. paid waiting) once the ride is completed. */
+  async function chargeRide(rideId: string): Promise<void> {
+    const { rows } = await db.query(
+      `SELECT passenger_id, card_id, driver_id, locked_price_tiyin FROM rides
+        WHERE id = $1 AND payment_method = 'card' AND payment_status = 'pending'`,
+      [rideId],
+    );
+    const r = rows[0];
+    if (!r) return;
+    await payments.chargeSavedCard({
+      type: 'ride', rideId, userId: r.passenger_id, cardId: r.card_id, driverId: r.driver_id,
+      amountTiyin: Number(r.locked_price_tiyin), description: 'Ride',
+    });
+  }
+
+  /** A cancellation fee is charged to the ride's card right away; for cash rides it stays a debt. */
+  async function chargeCancelFee(rideId: string): Promise<void> {
+    const { rows } = await db.query(
+      `SELECT passenger_id, card_id, driver_id, cancel_fee_tiyin FROM rides
+        WHERE id = $1 AND cancel_fee_status = 'pending' AND payment_method = 'card'`,
+      [rideId],
+    );
+    const r = rows[0];
+    if (!r) return;
+    await payments.chargeSavedCard({
+      type: 'cancel_fee', rideId, userId: r.passenger_id, cardId: r.card_id, driverId: r.driver_id,
+      amountTiyin: Number(r.cancel_fee_tiyin), description: 'Cancellation fee',
+    });
+  }
+
   app.post<{ Body: CreateBody }>(
     '/rides',
     {
@@ -59,6 +93,8 @@ export async function rideRoutes(app: FastifyInstance, { db, routes, cityCode }:
             stops: { type: 'array', minItems: 2, maxItems: 5, items: stop },
             mode: { type: 'string', enum: ['auto', 'choose'] },
             maxPriceTiyin: { type: 'integer', minimum: 0 },
+            paymentMethod: { type: 'string', enum: ['cash', 'card'] },
+            cardId: UUID,
             options: rideOptions,
             comment: { type: 'string', maxLength: 300 },
           },
@@ -78,6 +114,26 @@ export async function rideRoutes(app: FastifyInstance, { db, routes, cityCode }:
         [userId],
       );
       if (recent.rows[0]!.n >= MAX_RIDES_PER_HOUR) return reply.code(429).send({ error: 'too_many_rides' });
+
+      // Like Yandex: unpaid rides or cancellation fees must be settled before the next order.
+      const debts = await payments.debts(db, userId);
+      if (debts.length) {
+        return reply.code(402).send({ error: 'unpaid_debt', totalTiyin: debts.reduce((a, d) => a + d.amountTiyin, 0) });
+      }
+
+      const paymentMethod = request.body.paymentMethod ?? 'cash';
+      let cardId: string | null = null;
+      if (paymentMethod === 'card') {
+        // Only the passenger's own active card; default card if none given.
+        const { rows } = await db.query<{ id: string }>(
+          `SELECT id FROM payment_cards
+            WHERE user_id = $1 AND deleted_at IS NULL AND ($2::uuid IS NULL OR id = $2::uuid)
+              AND ($2::uuid IS NOT NULL OR is_default)`,
+          [userId, request.body.cardId ?? null],
+        );
+        if (!rows[0]) return reply.code(400).send({ error: 'card_not_found' });
+        cardId = rows[0].id;
+      }
 
       const cls = await db.query(
         `SELECT vc.* FROM vehicle_classes vc JOIN cities c ON c.id = vc.city_id
@@ -115,12 +171,13 @@ export async function rideRoutes(app: FastifyInstance, { db, routes, cityCode }:
         rideId = await withTx(db, async (tx) => {
           const { rows } = await tx.query<{ id: string }>(
             `INSERT INTO rides (city_id, passenger_id, class_id, route_distance_m, route_duration_s, options,
-                                driver_comment, dispatch_mode, max_price_tiyin, search_deadline)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, now() + make_interval(secs => $10)) RETURNING id`,
+                                driver_comment, dispatch_mode, max_price_tiyin, search_deadline, payment_method, card_id)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, now() + make_interval(secs => $10), $11, $12) RETURNING id`,
             [
               c.city_id, userId, c.id, route.distanceM, route.durationS,
               JSON.stringify(request.body.options ?? {}), request.body.comment ?? null,
               mode, mode === 'auto' ? request.body.maxPriceTiyin : null, SEARCH_WINDOW_SEC,
+              paymentMethod, cardId,
             ],
           );
           const id = rows[0]!.id;
@@ -409,9 +466,14 @@ export async function rideRoutes(app: FastifyInstance, { db, routes, cityCode }:
           }
         }
         await tx.query(`UPDATE rides SET status = $2 WHERE id = $1`, [ride.id, next]);
-        if (next === 'completed') await setPresenceStatus(tx, ride.driver_id!, 'online');
+        if (next === 'completed') {
+          await setPresenceStatus(tx, ride.driver_id!, 'online');
+          await tx.query(`UPDATE rides SET payment_status = 'pending' WHERE id = $1 AND payment_method = 'card'`, [ride.id]);
+        }
         await logEvent(tx, ride.id, `status:${next}`, 'driver', userId, { from: ride.status });
       });
+      // Charged after the ride is committed as completed; a failed charge becomes a debt.
+      if (next === 'completed') await chargeRide(request.params.id);
       return rideView(db, request.params.id, 'driver');
     },
   );
@@ -505,6 +567,7 @@ export async function rideRoutes(app: FastifyInstance, { db, routes, cityCode }:
           if (!paused) await setPresenceStatus(tx, ride.driver_id, 'online');
         }
       });
+      await chargeCancelFee(request.params.id);
       return rideView(db, request.params.id, role);
     },
   );

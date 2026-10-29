@@ -14,6 +14,8 @@ const isProduction = env === 'production';
 const authSecret = required('AUTH_SECRET');
 const smsProvider = process.env.SMS_PROVIDER ?? 'console';
 const routeProvider = process.env.ROUTE_PROVIDER ?? 'estimate';
+const paymentProviders = (process.env.PAYMENT_PROVIDERS ?? 'fake').split(',').map((s) => s.trim()).filter(Boolean);
+const paymentTokenKey = process.env.PAYMENT_TOKEN_KEY;
 
 if (isProduction) {
   if (authSecret.length < 32 || authSecret.startsWith('dev-')) {
@@ -25,6 +27,22 @@ if (isProduction) {
   if (routeProvider !== 'osrm') {
     throw new Error('ROUTE_PROVIDER must be osrm in production; the estimate provider is for development only');
   }
+  if (paymentProviders.includes('fake')) {
+    throw new Error('PAYMENT_PROVIDERS must not include fake in production (it approves payments without money)');
+  }
+  if (!paymentTokenKey) {
+    throw new Error('PAYMENT_TOKEN_KEY (32 random bytes, base64) is required in production to encrypt card tokens');
+  }
+}
+
+/** Optional per-provider webhook IP allowlists: PAYME_WEBHOOK_IPS=1.2.3.4,5.6.7.8 */
+function webhookIps(): Record<string, string[]> {
+  const out: Record<string, string[]> = {};
+  for (const name of ['payme', 'click', 'uzum']) {
+    const v = process.env[`${name.toUpperCase()}_WEBHOOK_IPS`];
+    if (v) out[name] = v.split(',').map((s) => s.trim()).filter(Boolean);
+  }
+  return out;
 }
 
 export const config = {
@@ -42,4 +60,8 @@ export const config = {
   fileBaseUrl: process.env.FILE_BASE_URL ?? 'https://files.example/',
   routeProvider,
   osrmUrl: process.env.OSRM_URL ?? 'http://localhost:5000',
+  paymentProviders,
+  paymentTokenKey,
+  paymentReturnUrl: process.env.PAYMENT_RETURN_URL ?? 'taxiapp://payment-result',
+  paymentWebhookIps: webhookIps(),
 };

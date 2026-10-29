@@ -85,6 +85,20 @@ every item below has a regression test in `apps/api/test/security.test.ts` or th
 - Ratings: participants only, completed rides only, once per side, 72 h window, reason required below 4,
   no self-rating. Only averages are exposed (after 5 ratings); authors, single scores and reasons are not.
 
+## Payments
+
+- Card numbers never reach our servers: the app tokenises cards with the provider's SDK; we accept only
+  tokens (a field for a card number is rejected), verify them with the provider and store them encrypted
+  (AES-256-GCM, key in `PAYMENT_TOKEN_KEY`, required in production). Tokens are never returned by the API.
+- Prices come only from our tables (plans, locked ride price, fees), never from the client.
+- A payment leaves `pending` exactly once, under a row lock; a success is accepted only for the exact
+  amount; repeated webhooks are acknowledged without effect; provider references are unique.
+- Card charges use idempotency keys (`ride:<id>`, `cancel_fee:<id>`), so retries never charge twice.
+- Webhooks: the adapter verifies authenticity before reading anything; optional per-provider IP allowlists;
+  every call is logged, but unverified bodies are not stored. Stub adapters refuse all webhooks.
+- Cards are owner-only; a card in use by an active ride cannot be removed; at most 5 cards per user.
+- Production refuses to start with the `fake` provider enabled.
+
 ## Errors
 
 - Internal errors return a generic `internal_error`; details go only to the server log.
@@ -104,6 +118,7 @@ The API refuses to start in production if:
 ## Still to do before launch
 
 - Real SMS provider adapter and its webhook signature checks.
+- Payme / Click / Uzum adapters (webhook auth, checkout, card tokens), fiscal operator, driver payouts, refunds.
 - File storage with signed upload URLs and image type checks.
 - Hosting in Uzbekistan, TLS, database backups and encryption at rest.
 - Admin actions audit log; 2FA for admin accounts.

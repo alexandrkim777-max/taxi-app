@@ -71,6 +71,14 @@ Tests: `npm test` (the API integration tests need a migrated database at `DATABA
 | POST | `/rides/:id/cancel` | passenger or driver | Before the trip starts; the passenger confirms any fee (`acceptFeeTiyin`), the driver may cancel as `noShow` after 5 min |
 | POST | `/rides/:id/rating` | participants | 1–5 after a completed ride (reason required below 4), once, within 72 h |
 | GET | `/me/ratings` | user | Own averages (shown after 5 ratings), completed and cancelled rides |
+| GET | `/subscription-plans` | anyone | Plans for sale and enabled payment providers |
+| GET | `/drivers/me/subscription` | verified driver | Active until, paid periods |
+| POST | `/drivers/me/subscriptions` | verified driver | Buys a plan: returns the provider's checkout link |
+| GET | `/payments/:id` | payer | Payment status (the app polls it after the checkout) |
+| GET/POST/DELETE | `/me/cards` | user | Saved cards: the app sends the provider's token, never the card number |
+| POST | `/me/cards/:id/default` | user | Default card |
+| GET | `/me/debts`, POST `/me/debts/pay` | user | Unpaid card rides and cancellation fees; settle them with a card |
+| POST | `/payments/webhooks/:provider` | provider | Server-to-server payment notifications (verified per provider) |
 | GET | `/rides/:id` | participants | Ride, stops, offers or assigned driver with live position |
 | GET | `/rides/active` | user | Current ride, to restore the app after a restart |
 | POST | `/rides/:id/route/preview` | passenger | New price for added / removed / changed stops; nothing changes yet |
@@ -109,6 +117,21 @@ instances) handles timeouts and newly arrived drivers.
 
 Live positions sit in an `UNLOGGED` PostgreSQL table behind `apps/api/src/dispatch/presence.ts`,
 so they can move to Redis when load requires it without touching the ride logic.
+
+## Payments
+
+Every provider sits behind one interface (`apps/api/src/payments/types.ts`). Connecting Payme, Click
+or Uzum means filling in its adapter in `apps/api/src/payments/providers/` and setting its keys in the
+environment; nothing else changes. Until then the adapters are stubs that refuse everything, and
+development uses the `fake` provider (test page at `/dev/payments/:id`; card tokens `fake_tok_*`,
+`fake_tok_decline_*` for a declined card).
+
+- Driver subscriptions: hosted checkout; the paid period starts when the current one ends.
+- Rides: cash (straight to the driver) or a saved card, charged on completion.
+- Cancellation fees: charged to the ride's card at once; on cash rides they become a debt.
+- Debts (declined card, unpaid fee) must be settled before the next order.
+- Fiscal receipts for subscriptions behind `payments/fiscal.ts` (stub until the OFD operator is connected).
+- Not yet: payouts of card money to drivers, refunds.
 
 ## Principles (see the product spec)
 

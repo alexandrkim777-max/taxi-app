@@ -13,6 +13,9 @@ import { rideRoutes } from './rides/routes.ts';
 import { routeChangeRoutes } from './rides/changes.ts';
 import { disputeRoutes } from './disputes/routes.ts';
 import { ratingRoutes } from './ratings/routes.ts';
+import { paymentRoutes } from './payments/routes.ts';
+import type { PaymentService } from './payments/service.ts';
+import type { ProviderName } from './payments/types.ts';
 
 export interface AppDeps {
   db: pg.Pool;
@@ -25,6 +28,12 @@ export interface AppDeps {
   logger?: boolean;
   /** Tests disable the per-IP limiter; it is always on in the server. */
   rateLimit?: boolean;
+  payments: PaymentService;
+  /** Deep link the provider's payment page returns to. */
+  paymentReturnUrl?: string;
+  paymentWebhookIps?: Partial<Record<ProviderName, string[]>>;
+  /** Development helper pages for the fake payment provider; never in production. */
+  devRoutes?: boolean;
 }
 
 /** Builds the API without starting it, so tests can call it via app.inject(). */
@@ -68,9 +77,16 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
   await app.register(driverRoutes, { db: deps.db, fileBaseUrl: deps.fileBaseUrl, cityCode: deps.cityCode });
   await app.register(tariffRoutes, { db: deps.db, routes: deps.routes, cityCode: deps.cityCode });
   await app.register(dispatchRoutes, { db: deps.db });
-  await app.register(rideRoutes, { db: deps.db, routes: deps.routes, cityCode: deps.cityCode });
+  await app.register(rideRoutes, { db: deps.db, routes: deps.routes, cityCode: deps.cityCode, payments: deps.payments });
   await app.register(routeChangeRoutes, { db: deps.db, routes: deps.routes });
   await app.register(disputeRoutes, { db: deps.db });
   await app.register(ratingRoutes, { db: deps.db });
+  await app.register(paymentRoutes, {
+    payments: deps.payments,
+    cityCode: deps.cityCode,
+    returnUrl: deps.paymentReturnUrl ?? 'taxiapp://payment-result',
+    webhookIps: deps.paymentWebhookIps ?? {},
+    devRoutes: deps.devRoutes ?? false,
+  });
   return app;
 }

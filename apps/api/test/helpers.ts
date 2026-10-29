@@ -7,6 +7,12 @@ import pg from 'pg';
 import { buildApp } from '../src/app.ts';
 import type { SmsSender } from '../src/sms/index.ts';
 import { EstimateRouteProvider } from '../src/routing/index.ts';
+import { PaymentService } from '../src/payments/service.ts';
+import { FakeProvider } from '../src/payments/providers/fake.ts';
+import { FakeFiscalProvider } from '../src/payments/fiscal.ts';
+import { DEV_TOKEN_KEY } from '../src/payments/crypto.ts';
+
+export const fakeProvider = new FakeProvider({ secret: 'test-fake-secret', baseUrl: 'http://localhost:3000' });
 
 const databaseUrl = process.env.DATABASE_URL;
 export const skip = !databaseUrl && 'DATABASE_URL is not set';
@@ -27,8 +33,12 @@ export function randomPhone(): string {
 
 export async function setup(opts: { rateLimit?: boolean } = {}) {
   const sms = new CapturingSms();
+  const payments = new PaymentService({
+    db, providers: new Map([['fake', fakeProvider]]), tokenKey: DEV_TOKEN_KEY, fiscal: new FakeFiscalProvider(),
+    log: { warn() {}, error() {} },
+  });
   const app = await buildApp({
-    db, sms, authSecret: 'test-secret', routes: new EstimateRouteProvider(),
+    db, sms, payments, devRoutes: true, authSecret: 'test-secret', routes: new EstimateRouteProvider(),
     fileBaseUrl: 'https://files.example/', cityCode: 'tashkent', rateLimit: opts.rateLimit ?? false,
   });
   async function login(phone: string): Promise<string> {
