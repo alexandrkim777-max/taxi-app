@@ -17,7 +17,7 @@ import type { RouteProvider } from '../routing/index.ts';
 import type { PaymentService } from '../payments/service.ts';
 import { uuidParams } from '../lib/geo.ts';
 import { cancelTerms, ARRIVAL_RADIUS_M, waitingOf } from './cancellation.ts';
-import { isBlocked, openOffers, rideFor, rideOptions, rideView, stop, UUID, type RideRow, type Role } from './common.ts';
+import { insertStops, learnEntrance, isBlocked, openOffers, rideFor, rideOptions, rideView, stop, UUID, type RideRow, type Role, type StopInput } from './common.ts';
 import { HttpError, isUniqueViolation, withTx } from '../lib/tx.ts';
 import { driverContext, pauseIfCancellingTooOften, PRESENCE_TTL_SEC, setPresenceStatus } from '../dispatch/presence.ts';
 import {
@@ -36,7 +36,7 @@ const MAX_RIDES_PER_HOUR = 20;
 
 interface CreateBody {
   classCode: string;
-  stops: { lat: number; lng: number; address?: string }[];
+  stops: StopInput[];
   mode?: 'auto' | 'choose';
   /** Auto mode: the price the passenger saw and agreed to; nobody more expensive is sent. */
   maxPriceTiyin?: number;
@@ -175,13 +175,7 @@ export async function rideRoutes(app: FastifyInstance, { db, routes, cityCode, p
             ],
           );
           const id = rows[0]!.id;
-          for (const [i, s] of request.body.stops.entries()) {
-            await tx.query(
-              `INSERT INTO ride_stops (ride_id, position, point, address)
-               VALUES ($1, $2, ST_SetSRID(ST_MakePoint($4, $3), 4326)::geography, $5)`,
-              [id, i, s.lat, s.lng, s.address ?? null],
-            );
-          }
+          await insertStops(tx, id, request.body.stops);
           await logEvent(tx, id, 'status:created', 'passenger', userId, { mode });
           await refreshOffers(tx, id);
           if (mode === 'auto') await assignNext(tx, id);
@@ -459,6 +453,7 @@ export async function rideRoutes(app: FastifyInstance, { db, routes, cityCode, p
             });
           }
         }
+        if (next === 'in_progress') await learnEntrance(tx, ride.id, ride.driver_id!);
         await tx.query(`UPDATE rides SET status = $2 WHERE id = $1`, [ride.id, next]);
         if (next === 'completed') {
           await setPresenceStatus(tx, ride.driver_id!, 'online');

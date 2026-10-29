@@ -21,6 +21,9 @@ export const stop = {
     lat: UZ_LAT,
     lng: UZ_LNG,
     address: { type: 'string', maxLength: 200 },
+    // Pickup only: a known entrance from /geo/entrances, or the number the passenger typed ("3", "2A").
+    entranceId: { type: 'string', pattern: '^[0-9a-fA-F-]{36}$' },
+    entranceLabel: { type: 'string', pattern: '^[0-9A-Za-zА-Яа-я]{1,8}$' },
   },
 } as const;
 
@@ -126,7 +129,8 @@ export async function rideView(q: Q, rideId: string, role: Role) {
   );
   const r = rows[0];
   const stops = await q.query(
-    `SELECT position, ST_Y(point::geometry) AS lat, ST_X(point::geometry) AS lng, address
+    `SELECT position, ST_Y(point::geometry) AS lat, ST_X(point::geometry) AS lng, address,
+            coalesce((SELECT e.number FROM entrances e WHERE e.id = ride_stops.entrance_id), entrance_label) AS entrance
        FROM ride_stops WHERE ride_id = $1 ORDER BY position`,
     [rideId],
   );
@@ -200,4 +204,64 @@ export async function rideView(q: Q, rideId: string, role: Role) {
     view.waiting = w.rows[0] ?? null;
   }
   return view;
+}
+
+export interface StopInput { lat: number; lng: number; address?: string; entranceId?: string; entranceLabel?: string }
+
+/**
+ * Writes a ride's stops. An entrance is kept only for the pickup and only if it really is near the pin
+ * (a known entrance within 150 m); otherwise it is dropped silently rather than misleading the driver.
+ */
+export async function insertStops(q: Q, rideId: string, stops: StopInput[]): Promise<void> {
+  for (const [i, s] of stops.entries()) {
+    await q.query(
+      `INSERT INTO ride_stops (ride_id, position, point, address, entrance_id, entrance_label)
+       VALUES ($1, $2, ST_SetSRID(ST_MakePoint($4, $3), 4326)::geography, $5,
+               (SELECT e.id FROM entrances e WHERE e.id = $6::uuid AND e.deleted_at IS NULL
+                   AND ST_DWithin(e.entrance_point, ST_SetSRID(ST_MakePoint($4, $3), 4326)::geography, 150)),
+               $7)`,
+      [rideId, i, s.lat, s.lng, s.address ?? null, i === 0 ? s.entranceId ?? null : null, i === 0 ? s.entranceLabel ?? null : null],
+    );
+  }
+}
+
+/**
+ * Our entrance database learns from real pickups: when the passenger named an entrance ("3") that we
+ * did not know yet, the driver's position at trip start is where that entrance is. A second pickup at
+ * the same entrance (within 60 m) confirms it instead of adding a duplicate.
+ */
+export async function learnEntrance(q: Q, rideId: string, driverId: string): Promise<void> {
+  const { rows } = await q.query<{ label: string; city_id: string; address: string | null; stop_lat: number; stop_lng: number; d_lat: number; d_lng: number }>(
+    `SELECT s.entrance_label AS label, r.city_id, s.address,
+            ST_Y(s.point::geometry) AS stop_lat, ST_X(s.point::geometry) AS stop_lng,
+            ST_Y(p.point::geometry) AS d_lat, ST_X(p.point::geometry) AS d_lng
+       FROM ride_stops s
+       JOIN rides r ON r.id = s.ride_id
+       JOIN driver_presence p ON p.driver_id = $2 AND p.updated_at > now() - interval '60 seconds'
+      WHERE s.ride_id = $1 AND s.position = 0 AND s.entrance_id IS NULL AND s.entrance_label IS NOT NULL
+        AND ST_DWithin(s.point, p.point, 200)`,
+    [rideId, driverId],
+  );
+  const r = rows[0];
+  if (!r) return;
+  const existing = await q.query<{ id: string }>(
+    `UPDATE entrances SET confirmed_pickups = confirmed_pickups + 1, updated_at = now()
+      WHERE id = (SELECT id FROM entrances
+                   WHERE deleted_at IS NULL AND upper(number) = upper($1)
+                     AND ST_DWithin(entrance_point, ST_SetSRID(ST_MakePoint($3, $2), 4326)::geography, 60)
+                   ORDER BY confirmed_pickups DESC LIMIT 1)
+      RETURNING id`,
+    [r.label, r.d_lat, r.d_lng],
+  );
+  let entranceId = existing.rows[0]?.id;
+  if (!entranceId) {
+    const ins = await q.query<{ id: string }>(
+      `INSERT INTO entrances (city_id, building_address, building_point, number, entrance_point, confirmed_pickups, source)
+       VALUES ($1, $2, ST_SetSRID(ST_MakePoint($4, $3), 4326)::geography, $5, ST_SetSRID(ST_MakePoint($7, $6), 4326)::geography, 1, 'pickups')
+       RETURNING id`,
+      [r.city_id, r.address ?? '', r.stop_lat, r.stop_lng, r.label.toUpperCase(), r.d_lat, r.d_lng],
+    );
+    entranceId = ins.rows[0]!.id;
+  }
+  await q.query(`UPDATE ride_stops SET entrance_id = $2 WHERE ride_id = $1 AND position = 0`, [rideId, entranceId]);
 }

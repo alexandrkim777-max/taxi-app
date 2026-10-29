@@ -10,6 +10,7 @@ import { FakeFiscalProvider } from './payments/fiscal.ts';
 import { DEV_TOKEN_KEY } from './payments/crypto.ts';
 import { prepayTick } from './payments/prepay.ts';
 import { FileService, LocalFileStorage } from './files/index.ts';
+import { createGeoProvider } from './geo/provider.ts';
 
 const payments = new PaymentService({
   db: pool,
@@ -22,6 +23,7 @@ const payments = new PaymentService({
 const app = await buildApp({
   db: pool,
   payments,
+  geo: createGeoProvider(config.geoProvider, config.nominatimUrl),
   files: new FileService({
     storage: new LocalFileStorage(config.fileStorageDir),
     secret: `${config.authSecret}:files`,

@@ -14,7 +14,7 @@ import type { RouteProvider, RouteResult } from '../routing/index.ts';
 import { haversineM, uuidParams } from '../lib/geo.ts';
 import { HttpError, withTx } from '../lib/tx.ts';
 import { logEvent } from '../dispatch/matching.ts';
-import { rideFor, rideView, stop } from './common.ts';
+import { insertStops, rideFor, rideView, stop } from './common.ts';
 
 interface Deps {
   db: pg.Pool;
@@ -25,6 +25,8 @@ interface Stop {
   lat: number;
   lng: number;
   address?: string;
+  entranceId?: string;
+  entranceLabel?: string;
 }
 
 /** Statuses in which the passenger may change the route. */
@@ -170,13 +172,7 @@ export async function routeChangeRoutes(app: FastifyInstance, { db, routes }: De
           [rideId, c.newPriceTiyin, c.route.distanceM, c.route.durationS],
         );
         await tx.query(`DELETE FROM ride_stops WHERE ride_id = $1`, [rideId]);
-        for (const [i, s] of request.body.stops.entries()) {
-          await tx.query(
-            `INSERT INTO ride_stops (ride_id, position, point, address)
-             VALUES ($1, $2, ST_SetSRID(ST_MakePoint($4, $3), 4326)::geography, $5)`,
-            [rideId, i, s.lat, s.lng, s.address ?? null],
-          );
-        }
+        await insertStops(tx, rideId, request.body.stops);
         await logEvent(tx, rideId, 'route_changed', 'passenger', userId, {
           reason: c.reason, oldPriceTiyin: c.oldPriceTiyin, newPriceTiyin: c.newPriceTiyin,
         });

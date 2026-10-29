@@ -102,7 +102,8 @@ export async function dispatchRoutes(app: FastifyInstance, { db }: Deps): Promis
               (SELECT ST_Distance(p.point, s0.point)::int FROM driver_presence p, ride_stops s0
                 WHERE p.driver_id = d.id AND s0.ride_id = r.id AND s0.position = 0) AS "pickupDistanceM",
               (SELECT json_agg(json_build_object('position', s.position, 'lat', ST_Y(s.point::geometry),
-                                                 'lng', ST_X(s.point::geometry), 'address', s.address)
+                                                 'lng', ST_X(s.point::geometry), 'address', s.address,
+                                                 'entrance', coalesce((SELECT e.number FROM entrances e WHERE e.id = s.entrance_id), s.entrance_label))
                                ORDER BY s.position)
                  FROM ride_stops s WHERE s.ride_id = r.id) AS stops
          FROM ride_offers o

@@ -16,6 +16,7 @@ const smsProvider = process.env.SMS_PROVIDER ?? 'console';
 const routeProvider = process.env.ROUTE_PROVIDER ?? 'estimate';
 const paymentProviders = (process.env.PAYMENT_PROVIDERS ?? 'fake').split(',').map((s) => s.trim()).filter(Boolean);
 const paymentTokenKey = process.env.PAYMENT_TOKEN_KEY;
+const geoProvider = process.env.GEO_PROVIDER ?? 'dev';
 
 if (isProduction) {
   if (authSecret.length < 32 || authSecret.startsWith('dev-')) {
@@ -29,6 +30,9 @@ if (isProduction) {
   }
   if (paymentProviders.includes('fake')) {
     throw new Error('PAYMENT_PROVIDERS must not include fake in production (it approves payments without money)');
+  }
+  if (geoProvider !== 'nominatim') {
+    throw new Error('GEO_PROVIDER must be nominatim in production; the dev list is for local testing only');
   }
   if (!paymentTokenKey) {
     throw new Error('PAYMENT_TOKEN_KEY (32 random bytes, base64) is required in production to encrypt card tokens');
@@ -68,4 +72,6 @@ export const config = {
   fileStorageDir: process.env.FILE_STORAGE_DIR ?? './var/files',
   /** Public base URL of this API, used in signed file links (e.g. https://example.uz/api). */
   publicApiUrl: process.env.PUBLIC_API_URL ?? `http://localhost:${process.env.PORT ?? 3000}`,
+  geoProvider,
+  nominatimUrl: process.env.NOMINATIM_URL ?? 'http://localhost:8080',
 };

@@ -129,6 +129,15 @@ every item below has a regression test in `apps/api/test/security.test.ts` or th
   data never ships. Pages are marked `noindex`.
 - To do: move the token to an httpOnly cookie with CSRF protection and add 2FA before launch.
 
+## Maps and places
+
+- Address search runs on our own Nominatim; passenger searches and positions never go to a third-party map service.
+- Search is signed-in only and rate-limited (60 per minute per user), queries are 2–120 characters.
+- Saved places belong to one user; every query filters by the session's user id, deleted places are soft-deleted.
+- A typed entrance is short text (letters and digits, up to 8); a known entrance is only accepted for the
+  pickup and within 150 m of it. Entrances learnt from pickups need the driver to be within 60 m.
+- Production refuses `GEO_PROVIDER=dev`.
+
 ## Errors
 
 - Internal errors return a generic `internal_error`; details go only to the server log.
@@ -139,7 +148,8 @@ The API refuses to start in production if:
 
 - `AUTH_SECRET` is shorter than 32 characters or is the development value;
 - `SMS_PROVIDER=console` (it would print login codes to the log);
-- `ROUTE_PROVIDER` is not `osrm`.
+- `ROUTE_PROVIDER` is not `osrm`;
+- `GEO_PROVIDER` is not `nominatim`.
 
 ## Dependencies
 

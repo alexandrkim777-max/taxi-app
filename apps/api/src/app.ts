@@ -22,6 +22,8 @@ import type { PaymentService } from './payments/service.ts';
 import type { ProviderName } from './payments/types.ts';
 import { setFileService, type FileService } from './files/index.ts';
 import { fileRoutes } from './files/routes.ts';
+import { geoRoutes } from './geo/routes.ts';
+import { DevGeoProvider, type GeoProvider } from './geo/provider.ts';
 
 export interface AppDeps {
   db: pg.Pool;
@@ -42,6 +44,8 @@ export interface AppDeps {
   devRoutes?: boolean;
   /** Private document storage with signed links. */
   files: FileService;
+  /** Address search; defaults to the built-in development list. */
+  geo?: GeoProvider;
 }
 
 /** Builds the API without starting it, so tests can call it via app.inject(). */
@@ -91,6 +95,7 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
   await app.register(disputeRoutes, { db: deps.db });
   await app.register(ratingRoutes, { db: deps.db });
   await app.register(fileRoutes);
+  await app.register(geoRoutes, { db: deps.db, geo: deps.geo ?? new DevGeoProvider() });
   await app.register(complaintRoutes, { db: deps.db });
   await app.register(adminPeopleRoutes, { db: deps.db, cityCode: deps.cityCode });
   await app.register(adminPricingRoutes, { db: deps.db, cityCode: deps.cityCode });

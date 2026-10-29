@@ -83,6 +83,10 @@ Tests: `npm test` (the API integration tests need a migrated database at `DATABA
 | POST | `/me/cards/:id/default` | user | Default card |
 | GET | `/me/debts`, POST `/me/debts/pay` | user | Unpaid card rides and cancellation fees; settle them with a card |
 | POST | `/payments/webhooks/:provider` | provider | Server-to-server payment notifications (verified per provider) |
+| GET | `/geo/search?q=&lat=&lng=` | user | Address and place search (our own Nominatim; 60 per minute) |
+| GET | `/geo/reverse?lat=&lng=` | user | Address of a point on the map |
+| GET | `/geo/entrances?lat=&lng=` | user | Known entrances (подъезды) within 120 m of a pickup |
+| GET / PUT / POST / DELETE | `/me/places`, `/me/places/home`, `/me/places/work`, `/me/places/:id` | user | Saved places: home, work and up to 10 more |
 | POST | `/rides/:id/complaint` | participants | Complaint about the ride (rude, unsafe driving, asked for extra cash, …) |
 
 ### Driver app
@@ -104,6 +108,13 @@ npm run build:demo                      # clickable web demo with a pretend serv
 - Session token in the phone's secure storage (Keychain / Keystore). Theme follows the design tokens
   and switches to night automatically after 19:00.
 - Background location and the camera need a development build (`npx expo run:android`); Expo Go covers the rest.
+
+### Maps
+
+Our own maps, like Uklon: OpenStreetMap data, our style from the design tokens, our own routing (OSRM)
+and address search (Nominatim), and our own entrance database. A pickup may name an entrance; when the
+trip starts, the driver's position is stored as that entrance, so the next passenger at that house gets
+"подъезд 3" with the exact point. Build steps are in [docs/maps.md](docs/maps.md).
 
 ## Admin panel API
 
