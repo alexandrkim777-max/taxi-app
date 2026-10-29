@@ -1,40 +1,8 @@
-// Integration test: needs a migrated database at DATABASE_URL. Skipped when it is not set.
+// Integration tests: SMS login and driver registration/moderation.
 
-import { test, after } from 'node:test';
+import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import pg from 'pg';
-import { buildApp } from '../src/app.ts';
-import type { SmsSender } from '../src/sms/index.ts';
-
-const databaseUrl = process.env.DATABASE_URL;
-const skip = !databaseUrl && 'DATABASE_URL is not set';
-
-const db = new pg.Pool({ connectionString: databaseUrl });
-after(() => db.end());
-
-class CapturingSms implements SmsSender {
-  last = new Map<string, string>();
-  async send(phone: string, text: string): Promise<void> {
-    this.last.set(phone, text.match(/\d{6}/)![0]);
-  }
-}
-
-function randomPhone(): string {
-  return `+99890${String(Math.floor(Math.random() * 10_000_000)).padStart(7, '0')}`;
-}
-
-async function setup() {
-  const sms = new CapturingSms();
-  const app = await buildApp({ db, sms, authSecret: 'test-secret' });
-  async function login(phone: string): Promise<string> {
-    const req = await app.inject({ method: 'POST', url: '/auth/request-code', payload: { phone, language: 'ru' } });
-    assert.equal(req.statusCode, 204);
-    const res = await app.inject({ method: 'POST', url: '/auth/verify', payload: { phone, code: sms.last.get(phone) } });
-    assert.equal(res.statusCode, 200, res.body);
-    return res.json().token;
-  }
-  return { app, sms, login };
-}
+import { db, randomPhone, setup, skip } from './helpers.ts';
 
 test('SMS login: wrong code, cooldown, success, /me, logout', { skip }, async () => {
   const { app, sms, login } = await setup();

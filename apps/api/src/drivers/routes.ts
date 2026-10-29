@@ -6,6 +6,9 @@ export const REQUIRED_DOCUMENTS = ['passport', 'license', 'vehicle_registration'
 
 interface Deps {
   db: pg.Pool;
+  /** Only links into our own storage are accepted (no arbitrary URLs). */
+  fileBaseUrl: string;
+  cityCode: string;
 }
 
 async function driverIdFor(db: pg.Pool, userId: string): Promise<string | null> {
@@ -43,7 +46,7 @@ async function driverProfile(db: pg.Pool, driverId: string) {
   };
 }
 
-export async function driverRoutes(app: FastifyInstance, { db }: Deps): Promise<void> {
+export async function driverRoutes(app: FastifyInstance, { db, fileBaseUrl, cityCode }: Deps): Promise<void> {
   app.post<{ Body: { name: string; gender?: 'female' | 'male'; languages?: string[] } }>(
     '/drivers/apply',
     {
@@ -137,6 +140,7 @@ export async function driverRoutes(app: FastifyInstance, { db }: Deps): Promise<
       const driverId = await driverIdFor(db, request.user!.id);
       if (!driverId) return reply.code(404).send({ error: 'not_a_driver' });
       const { type, fileUrl } = request.body;
+      if (!fileUrl.startsWith(fileBaseUrl)) return reply.code(400).send({ error: 'file_not_in_storage' });
       // A new upload replaces the previous one of the same type (soft delete keeps history).
       await db.query(
         `UPDATE driver_documents SET deleted_at = now()
@@ -156,7 +160,15 @@ export async function driverRoutes(app: FastifyInstance, { db }: Deps): Promise<
 
   app.get<{ Querystring: { status?: string } }>(
     '/admin/drivers',
-    { preHandler: requireRole('admin') },
+    {
+      preHandler: requireRole('admin'),
+      schema: {
+        querystring: {
+          type: 'object',
+          properties: { status: { type: 'string', enum: ['pending', 'verified', 'rejected', 'blocked'] } },
+        },
+      },
+    },
     async (request) => {
       const { rows } = await db.query<{ id: string }>(
         `SELECT id FROM drivers WHERE deleted_at IS NULL AND status = $1 ORDER BY created_at`,
@@ -175,7 +187,10 @@ export async function driverRoutes(app: FastifyInstance, { db }: Deps): Promise<
         body: {
           type: 'object',
           required: ['vehicleId', 'classCode'],
-          properties: { vehicleId: { type: 'string' }, classCode: { type: 'string' } },
+          properties: {
+            vehicleId: { type: 'string', pattern: '^[0-9a-f-]{36}$' },
+            classCode: { type: 'string', pattern: '^[a-z_]{2,32}$' },
+          },
         },
       },
     },
@@ -192,8 +207,8 @@ export async function driverRoutes(app: FastifyInstance, { db }: Deps): Promise<
         await client.query('BEGIN');
         const cls = await client.query<{ id: string; city_id: string }>(
           `SELECT vc.id, vc.city_id FROM vehicle_classes vc JOIN cities c ON c.id = vc.city_id
-            WHERE vc.code = $1 AND c.code = 'tashkent' AND vc.deleted_at IS NULL`,
-          [request.body.classCode],
+            WHERE vc.code = $1 AND c.code = $2 AND vc.deleted_at IS NULL`,
+          [request.body.classCode, cityCode],
         );
         if (!cls.rows[0]) {
           await client.query('ROLLBACK');

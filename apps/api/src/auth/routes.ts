@@ -9,6 +9,9 @@ const CODE_TTL_MIN = 5;
 const RESEND_COOLDOWN_SEC = 60;
 const MAX_ATTEMPTS = 5;
 const SESSION_DAYS = 90;
+const MAX_CODES_PER_HOUR = 5;
+/** Stricter per-IP limits for the login endpoints (on top of the global limit). */
+const AUTH_IP_LIMIT = { rateLimit: { max: 5, timeWindow: '1 minute' } };
 
 const SMS_TEXT: Record<string, (code: string) => string> = {
   uz: (c) => `Kirish kodi: ${c}. Hech kimga aytmang.`,
@@ -26,6 +29,7 @@ export async function authRoutes(app: FastifyInstance, { db, sms, authSecret }: 
   app.post<{ Body: { phone: string; language?: 'uz' | 'ru' | 'en' } }>(
     '/auth/request-code',
     {
+      config: AUTH_IP_LIMIT,
       schema: {
         body: {
           type: 'object',
@@ -41,11 +45,20 @@ export async function authRoutes(app: FastifyInstance, { db, sms, authSecret }: 
       const phone = normalizeUzPhone(request.body.phone);
       if (!phone) return reply.code(400).send({ error: 'invalid_phone' });
 
-      const recent = await db.query(
-        `SELECT 1 FROM auth_codes WHERE phone = $1 AND created_at > now() - make_interval(secs => $2)`,
+      // Per-phone limits: one code per minute and a cap per hour. Together with the
+      // per-IP limit this blocks code brute force and SMS-pumping fraud.
+      const recent = await db.query<{ last_minute: number; last_hour: number }>(
+        `SELECT count(*) FILTER (WHERE created_at > now() - make_interval(secs => $2))::int AS last_minute,
+                count(*)::int AS last_hour
+           FROM auth_codes WHERE phone = $1 AND created_at > now() - interval '1 hour'`,
         [phone, RESEND_COOLDOWN_SEC],
       );
-      if (recent.rowCount) return reply.code(429).send({ error: 'too_soon', retryAfterSec: RESEND_COOLDOWN_SEC });
+      if (recent.rows[0].last_minute > 0) {
+        return reply.code(429).send({ error: 'too_soon', retryAfterSec: RESEND_COOLDOWN_SEC });
+      }
+      if (recent.rows[0].last_hour >= MAX_CODES_PER_HOUR) {
+        return reply.code(429).send({ error: 'too_many_codes' });
+      }
 
       const code = generateCode();
       await db.query(
@@ -62,6 +75,7 @@ export async function authRoutes(app: FastifyInstance, { db, sms, authSecret }: 
   app.post<{ Body: { phone: string; code: string; language?: 'uz' | 'ru' | 'en' } }>(
     '/auth/verify',
     {
+      config: AUTH_IP_LIMIT,
       schema: {
         body: {
           type: 'object',
@@ -78,22 +92,30 @@ export async function authRoutes(app: FastifyInstance, { db, sms, authSecret }: 
       const phone = normalizeUzPhone(request.body.phone);
       if (!phone) return reply.code(400).send({ error: 'invalid_phone' });
 
-      const { rows } = await db.query<{ id: string; code_hash: string; attempts: number }>(
-        `SELECT id, code_hash, attempts FROM auth_codes
-          WHERE phone = $1 AND consumed_at IS NULL AND expires_at > now()
-          ORDER BY created_at DESC LIMIT 1`,
-        [phone],
+      // Count the attempt atomically BEFORE comparing, so parallel requests
+      // cannot get more than MAX_ATTEMPTS guesses at one code.
+      const { rows } = await db.query<{ id: string; code_hash: string }>(
+        `UPDATE auth_codes SET attempts = attempts + 1
+          WHERE id = (SELECT id FROM auth_codes
+                       WHERE phone = $1 AND consumed_at IS NULL AND expires_at > now()
+                       ORDER BY created_at DESC LIMIT 1)
+            AND attempts < $2
+          RETURNING id, code_hash`,
+        [phone, MAX_ATTEMPTS],
       );
       const entry = rows[0];
-      if (!entry) return reply.code(400).send({ error: 'code_expired' });
-      if (entry.attempts >= MAX_ATTEMPTS) return reply.code(429).send({ error: 'too_many_attempts' });
+      if (!entry) return reply.code(400).send({ error: 'code_invalid_or_expired' });
 
       if (!safeEqualHex(entry.code_hash, hashCode(authSecret, phone, request.body.code))) {
-        await db.query('UPDATE auth_codes SET attempts = attempts + 1 WHERE id = $1', [entry.id]);
         return reply.code(400).send({ error: 'wrong_code' });
       }
 
-      await db.query('UPDATE auth_codes SET consumed_at = now() WHERE id = $1', [entry.id]);
+      // Single use: only one request can consume the code.
+      const consumed = await db.query(
+        'UPDATE auth_codes SET consumed_at = now() WHERE id = $1 AND consumed_at IS NULL',
+        [entry.id],
+      );
+      if (!consumed.rowCount) return reply.code(400).send({ error: 'code_invalid_or_expired' });
       const user = await db.query<{ id: string; phone: string; roles: string[]; language: string; name: string | null }>(
         `INSERT INTO users (phone, language) VALUES ($1, $2)
          ON CONFLICT (phone) DO UPDATE SET phone = EXCLUDED.phone

@@ -52,6 +52,12 @@ Tests: `npm test` (the API integration tests need a migrated database at `DATABA
 | GET | `/admin/drivers?status=pending` | admin | Moderation queue |
 | POST | `/admin/drivers/:id/approve` | admin | Assigns the class, approves documents, starts the free trial month |
 | POST | `/admin/drivers/:id/reject` | admin | Rejects with a reason the driver sees |
+| GET | `/classes` | anyone | Vehicle classes with recommended tariff and price corridor |
+| GET | `/drivers/me/tariff` | verified driver | Current tariff (or recommended), allowed bounds per component |
+| PUT | `/drivers/me/tariff` | verified driver | New tariff version inside the corridor, at most once per 24 h |
+| POST | `/quotes` | user | Server-side route for 2–5 stops and the price range per class |
+
+Security measures: see [SECURITY.md](SECURITY.md).
 
 ## Principles (see the product spec)
 
