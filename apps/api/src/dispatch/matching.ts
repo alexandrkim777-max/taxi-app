@@ -1,9 +1,11 @@
 // Matching rides to drivers.
 //
 // Offers: every nearby free driver of the class gets an offer at their own price, clamped
-// into the corridor. In 'choose' mode the passenger picks one; in 'auto' mode the system
-// sends the ride to the best offer at or below the passenger's ceiling, and moves on to the
-// next one when a driver declines or lets the request lapse.
+// into the corridor. In 'auto' mode (the passenger app's only mode) the passenger picks
+// "cheaper" or "faster" and agrees to that price as a ceiling; the system sends the ride to the
+// best driver by that rule at or below the ceiling, and moves on to the next one when a driver
+// declines or lets the request lapse. 'choose' mode (pick from a list) stays in the API but is
+// not offered in the app.
 
 import type pg from 'pg';
 import { driverPriceTiyin, type RouteEstimate, type Tariff } from '@taxi/shared';
@@ -19,28 +21,41 @@ export const ACCEPT_WINDOW_SEC = { auto: 15, choose: 30 } as const;
 export const SEARCH_WINDOW_SEC = 5 * 60;
 export const MAX_OFFERS = 10;
 
-/**
- * One minute of extra waiting for pickup is weighed like 1 000 sum of price, so a slightly
- * cheaper driver 12 minutes away does not beat a nearby one.
- */
-const TIYIN_PER_PICKUP_MIN = 100_000;
-
 /** Rough pickup time from straight-line distance (same model as the estimate router). */
 export function pickupMin(distanceM: number): number {
   return Math.max(1, Math.ceil((distanceM * 1.35) / ((22_000 / 60))));
 }
 
 /**
- * Each rating point below 5.0 is weighed like 2 000 sum, so with similar prices and pickup a
- * better-rated driver gets the order first (4.5 -> +1 000 sum, 4.0 -> +2 000 sum). Drivers with
- * fewer than 5 ratings are not penalised.
+ * What the passenger asked for: "cheaper" (lower price, a longer wait is fine) or "faster"
+ * (shortest reasonable pickup, the price may be a little higher). The system picks the driver.
  */
-const TIYIN_PER_RATING_POINT = 200_000;
+export type Priority = 'cheap' | 'fast';
 
-export function offerScore(priceTiyin: number, distanceM: number, rating: number | null = null): number {
+/** "Cheaper" still never sends a car that is more than this far away, while a nearer one exists. */
+export const CHEAP_MAX_PICKUP_MIN = 15;
+
+/**
+ * How a minute of pickup is weighed against price:
+ *   cheap — a minute is worth 200 sum, so price decides and pickup only breaks near-ties;
+ *   fast  — a minute is worth 3 000 sum, so the nearest car wins unless it is much pricier.
+ * Each rating point below 5.0 counts like 2 000 sum in both (drivers with < 5 ratings: no penalty),
+ * so with similar price and pickup the better-rated driver gets the order.
+ */
+const TIYIN_PER_PICKUP_MIN: Record<Priority, number> = { cheap: 20_000, fast: 300_000 };
+const TIYIN_PER_RATING_POINT = 200_000;
+const TOO_FAR = 1e12;
+
+export function rankScore(priority: Priority, priceTiyin: number, distanceM: number, rating: number | null = null): number {
+  const min = pickupMin(distanceM);
   const ratingPenalty = rating === null ? 0 : Math.max(0, 5 - rating) * TIYIN_PER_RATING_POINT;
-  return priceTiyin + pickupMin(distanceM) * TIYIN_PER_PICKUP_MIN + ratingPenalty;
+  const tooFar = priority === 'cheap' && min > CHEAP_MAX_PICKUP_MIN ? TOO_FAR : 0;
+  return priceTiyin + min * TIYIN_PER_PICKUP_MIN[priority] + ratingPenalty + tooFar;
 }
+
+/** Two options closer than this are shown as one "best option" (two near-identical cards only confuse). */
+export const SAME_PRICE_TIYIN = 100_000;
+export const SAME_PICKUP_MIN = 2;
 
 export interface ClassPricing {
   classId: string;
@@ -54,6 +69,8 @@ export interface PricedDriver {
   driverId: string;
   tariffId: string;
   distanceM: number;
+  lat: number;
+  lng: number;
   rating: number | null;
   priceTiyin: number;
 }
@@ -70,18 +87,39 @@ export async function pricedDrivers(
     driverId: d.driverId,
     tariffId: d.tariffId,
     distanceM: d.distanceM,
+    lat: d.lat,
+    lng: d.lng,
     rating: d.rating,
     priceTiyin: driverPriceTiyin(d, opts.cls.recommended, opts.cls.corridor, opts.route, opts.cls.coefficient),
   }));
 }
 
-/** The best offer for a one-tap order, or null when no driver is around. */
-export function bestOf(drivers: PricedDriver[]): PricedDriver | null {
+export interface Option { priority: Priority; driver: PricedDriver }
+
+function bestBy(priority: Priority, drivers: PricedDriver[]): PricedDriver | null {
   let best: PricedDriver | null = null;
   for (const d of drivers) {
-    if (!best || offerScore(d.priceTiyin, d.distanceM, d.rating) < offerScore(best.priceTiyin, best.distanceM, best.rating)) best = d;
+    if (!best || rankScore(priority, d.priceTiyin, d.distanceM, d.rating) < rankScore(priority, best.priceTiyin, best.distanceM, best.rating)) best = d;
   }
   return best;
+}
+
+/**
+ * The options shown to the passenger: "cheaper" and "faster", or just one when they would be
+ * (nearly) the same — same driver, less than 1 000 sum apart, or less than 2 minutes apart.
+ * `etaMin` gives each driver's pickup time in minutes (road time when available).
+ */
+export function optionsOf(drivers: PricedDriver[], etaMin: (d: PricedDriver) => number = (d) => pickupMin(d.distanceM)): Option[] {
+  const fast = bestBy('fast', drivers);
+  if (!fast) return [];
+  const cheapPick = bestBy('cheap', drivers);
+  const cheap = cheapPick && etaMin(cheapPick) <= CHEAP_MAX_PICKUP_MIN ? cheapPick : null;
+  if (!cheap || cheap.driverId === fast.driverId) return [{ priority: 'fast', driver: fast }];
+  // The faster car at almost the same price: no reason to offer the slower one.
+  if (fast.priceTiyin - cheap.priceTiyin < SAME_PRICE_TIYIN) return [{ priority: 'fast', driver: fast }];
+  // Almost the same wait (or the "faster" one is not faster by road): the cheaper one is simply better.
+  if (etaMin(cheap) - etaMin(fast) < SAME_PICKUP_MIN) return [{ priority: 'cheap', driver: cheap }];
+  return [{ priority: 'cheap', driver: cheap }, { priority: 'fast', driver: fast }];
 }
 
 interface RideForSearch {
@@ -176,8 +214,8 @@ export type AssignResult = 'sent' | 'waiting' | 'already_sent' | 'needs_confirma
  *   passenger instead; nothing is sent until they confirm.
  */
 export async function assignNext(tx: pg.PoolClient, rideId: string): Promise<AssignResult> {
-  const { rows: rides } = await tx.query<{ max_price_tiyin: string; price_proposal_tiyin: string | null }>(
-    `SELECT max_price_tiyin, price_proposal_tiyin FROM rides WHERE id = $1`,
+  const { rows: rides } = await tx.query<{ max_price_tiyin: string; price_proposal_tiyin: string | null; priority: Priority | null }>(
+    `SELECT max_price_tiyin, price_proposal_tiyin, priority FROM rides WHERE id = $1`,
     [rideId],
   );
   const ride = rides[0]!;
@@ -221,8 +259,10 @@ export async function assignNext(tx: pg.PoolClient, rideId: string): Promise<Ass
     return 'needs_confirmation';
   }
 
+  // Every next driver is picked by the rule the passenger chose ("cheaper" or "faster").
+  const priority: Priority = ride.priority ?? 'fast';
   affordable.sort((a, b) =>
-    offerScore(Number(a.price_tiyin), a.distance_m, a.rating) - offerScore(Number(b.price_tiyin), b.distance_m, b.rating));
+    rankScore(priority, Number(a.price_tiyin), a.distance_m, a.rating) - rankScore(priority, Number(b.price_tiyin), b.distance_m, b.rating));
   for (const pick of affordable) {
     if (!(await reserveDriver(tx, pick.driver_id))) continue;
     await tx.query(

@@ -12,7 +12,7 @@ import { Map } from '../map/Map';
 import type { MapPin } from '../map/types';
 import { useRide } from '../ride';
 import { space, useTheme } from '../theme';
-import type { CancelTerms, Offer, Ride, Stop } from '../types';
+import type { CancelTerms, Ride, Stop } from '../types';
 import { Button, Card, Chip, Divider, ErrorNote, Pill, Plate, Progress, Row, Sheet, T } from '../components/ui';
 
 function useNow(ms = 1000): number {
@@ -48,15 +48,6 @@ export function RideScreen({ ride }: { ride: Ride }) {
     setBusy(key); setError(null);
     try { const r = await fn(); if (r) setRide(r); } catch (e) { setError(err(e)); } finally { setBusy(null); }
   }
-
-  // Choose mode: keep the list of drivers fresh while nobody is chosen.
-  const choosing = ride.status === 'created' && ride.mode === 'choose' && !(ride.offers ?? []).some((o) => o.status === 'chosen');
-  useEffect(() => {
-    if (!choosing) return;
-    const refresh = () => api<Offer[]>(`/rides/${ride.id}/search`, { body: {} }).then((offers) => setRide({ ...ride, offers })).catch(() => {});
-    const timer = setInterval(refresh, 6000);
-    return () => clearInterval(timer);
-  }, [choosing, ride.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   async function askCancel() {
     await act('terms', async () => { setTerms(await api<CancelTerms>(`/rides/${ride.id}/cancel-terms`)); });
@@ -114,30 +105,14 @@ export function RideScreen({ ride }: { ride: Ride }) {
       body = (
         <View style={{ gap: space.s2 }}>
           <Row gap={space.s3}><ActivityIndicator color={c.brand} /><T v="title">{d?.state === 'waiting_driver' ? t.waitingDriver : t.searching}</T></Row>
+          {ride.priority && <Pill tone="neutral">{ride.priority === 'cheap' ? t.cheaper : t.faster}</Pill>}
           <T muted>{t.searchingHint} {money(ride.maxPriceTiyin ?? null, lang)}{left !== null && left > 0 ? ` · ${mmss(left)}` : ''}</T>
         </View>
       );
     }
   } else if (ride.status === 'created') {
-    const offers = ride.offers ?? [];
-    const chosen = offers.find((o) => o.status === 'chosen');
-    body = chosen ? (
-      <View style={{ gap: space.s2 }}>
-        <Row gap={space.s3}><ActivityIndicator color={c.brand} /><T v="title">{t.waitingDriver}</T></Row>
-        <OfferRow o={chosen} />
-      </View>
-    ) : (
-      <View style={{ gap: space.s2 }}>
-        <Row style={{ justifyContent: 'space-between' }}>
-          <T v="title">{t.driversList}</T>
-          <Chip label={t.refresh} onPress={() => act('search', async () => { const o = await api<Offer[]>(`/rides/${ride.id}/search`, { body: {} }); return { ...ride, offers: o }; })} />
-        </Row>
-        {offers.length === 0 && <T muted>{t.noOffers}</T>}
-        {offers.map((o) => (
-          <OfferRow key={o.id} o={o} action={<Button compact title={t.choose} busy={busy === o.id} onPress={() => act(o.id, () => api<Ride>(`/rides/${ride.id}/choose`, { body: { offerId: o.id } }))} />} />
-        ))}
-      </View>
-    );
+    // Rides ordered from a list (an API-only mode): just wait for the driver.
+    body = <Row gap={space.s3}><ActivityIndicator color={c.brand} /><T v="title">{t.waitingDriver}</T></Row>;
   } else {
     const w = ride.waiting;
     const freeLeft = w?.freeUntil ? (new Date(w.freeUntil).getTime() - now) / 1000 : 0;
@@ -240,22 +215,6 @@ export function RideScreen({ ride }: { ride: Ride }) {
         )}
       </Sheet>
     </View>
-  );
-}
-
-function OfferRow({ o, action }: { o: Offer; action?: ReactNode }) {
-  const { t, lang } = useApp();
-  return (
-    <Card>
-      <Row style={{ justifyContent: 'space-between', flexWrap: 'nowrap' }}>
-        <View style={{ flex: 1, gap: 2 }}>
-          <T v="bodyStrong">{o.driverName ?? '—'}{o.rating ? `  ★ ${o.rating.toFixed(2)}` : ''}</T>
-          <T v="caption" muted>{o.makeModel} · {o.color} · {o.pickupMin} {t.min}</T>
-        </View>
-        <T v="price">{money(o.priceTiyin, lang)}</T>
-      </Row>
-      {action}
-    </Card>
   );
 }
 

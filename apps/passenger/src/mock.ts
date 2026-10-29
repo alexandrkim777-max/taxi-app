@@ -1,5 +1,5 @@
 // Demo mode only: a pretend server so the whole passenger journey can be tried in a browser —
-// sign-in, "where to", entrance, prices, one tap or choosing a driver, the car coming, the trip,
+// sign-in, "where to", entrance, "cheaper" or "faster", the car coming, the trip,
 // the 60% card charge, rating, complaints and disputes. Names, cars and addresses are made up;
 // coordinates of the places are approximate. Never included in real builds (see metro.config.js).
 
@@ -37,13 +37,30 @@ const CLASSES = [
   { code: 'economy', name: { uz: 'Ekonom', ru: 'Эконом', en: 'Economy' }, seats: 4, k: 1, coefficient: 1 },
   { code: 'comfort', name: { uz: 'Komfort', ru: 'Комфорт', en: 'Comfort' }, seats: 4, k: 1.35, coefficient: 1.15 },
   { code: 'business', name: { uz: 'Biznes', ru: 'Бизнес', en: 'Business' }, seats: 4, k: 2, coefficient: 1 },
+  { code: 'minivan', name: { uz: 'Miniven', ru: 'Минивэн', en: 'Minivan' }, seats: 7, k: 1.5, coefficient: 1 },
 ];
+// Who is around in the demo: economy has a cheap driver far away and a dearer one close by (two
+// options), comfort and business one sensible option each, no minivan free (the "no cars" case).
 const DRIVERS = [
-  { name: 'Jasur', rating: 4.93, car: 'Chevrolet Cobalt', color: { uz: 'oq', ru: 'белый', en: 'white' }, plate: '01A123BC', share: 0.84, pickupMin: 4, highlights: [{ code: 'careful_driving', count: 41 }, { code: 'clean_car', count: 33 }] },
-  { name: 'Dilshod', rating: 4.88, car: 'Chevrolet Gentra', color: { uz: 'kumush', ru: 'серебристый', en: 'silver' }, plate: '01B456CD', share: 0.9, pickupMin: 3, highlights: [{ code: 'polite', count: 27 }] },
-  { name: 'Rustam', rating: 4.97, car: 'Kia K5', color: { uz: 'qora', ru: 'чёрный', en: 'black' }, plate: '01C789DE', share: 0.95, pickupMin: 6, highlights: [{ code: 'comfortable', count: 52 }, { code: 'knows_city', count: 30 }] },
-  { name: 'Bekzod', rating: null, car: 'Chevrolet Nexia 3', color: { uz: 'oq', ru: 'белый', en: 'white' }, plate: '01D246EF', share: 1, pickupMin: 2, highlights: [] },
+  { name: 'Jasur', rating: 4.93, car: 'Chevrolet Cobalt', color: { uz: 'oq', ru: 'белый', en: 'white' }, plate: '01A123BC', share: 0.82, pickupMin: 9, cls: 'economy', highlights: [{ code: 'careful_driving', count: 41 }, { code: 'clean_car', count: 33 }] },
+  { name: 'Dilshod', rating: 4.88, car: 'Chevrolet Gentra', color: { uz: 'kumush', ru: 'серебристый', en: 'silver' }, plate: '01B456CD', share: 0.9, pickupMin: 6, cls: 'economy', highlights: [{ code: 'polite', count: 27 }] },
+  { name: 'Bekzod', rating: null, car: 'Chevrolet Nexia 3', color: { uz: 'oq', ru: 'белый', en: 'white' }, plate: '01D246EF', share: 0.97, pickupMin: 2, cls: 'economy', highlights: [] },
+  { name: 'Rustam', rating: 4.97, car: 'Kia K5', color: { uz: 'qora', ru: 'чёрный', en: 'black' }, plate: '01C789DE', share: 0.92, pickupMin: 5, cls: 'comfort', highlights: [{ code: 'comfortable', count: 52 }, { code: 'knows_city', count: 30 }] },
+  { name: 'Timur', rating: 4.99, car: 'Mercedes-Benz E-Class', color: { uz: 'qora', ru: 'чёрный', en: 'black' }, plate: '01E777FA', share: 1, pickupMin: 7, cls: 'business', highlights: [{ code: 'polite', count: 64 }] },
 ];
+type Driver = (typeof DRIVERS)[number];
+
+/** Same rules as the server: cheaper = lowest price (pickup up to 15 min), faster = nearest; one option when nearly equal. */
+function optionsFor(classCode: string, ref: number): { priority: 'cheap' | 'fast'; priceTiyin: number; pickupMin: number; driver: Driver }[] {
+  const ds = DRIVERS.filter((d) => d.cls === classCode).map((d) => ({ d, price: round500(ref * d.share) }));
+  if (!ds.length) return [];
+  const fast = [...ds].sort((a, b) => a.price + a.d.pickupMin * 300_000 - (b.price + b.d.pickupMin * 300_000))[0]!;
+  const cheap = [...ds].filter((x) => x.d.pickupMin <= 15).sort((a, b) => a.price + a.d.pickupMin * 20_000 - (b.price + b.d.pickupMin * 20_000))[0];
+  const opt = (priority: 'cheap' | 'fast', x: typeof fast) => ({ priority, priceTiyin: x.price, pickupMin: x.d.pickupMin, driver: x.d });
+  if (!cheap || cheap.d === fast.d || fast.price - cheap.price < 100_000) return [opt('fast', fast)];
+  if (cheap.d.pickupMin - fast.d.pickupMin < 2) return [opt('cheap', cheap)];
+  return [opt('cheap', cheap), opt('fast', fast)];
+}
 
 let lang: keyof L = 'uz';
 const state: Row = {
@@ -78,26 +95,20 @@ const CITY: L = { uz: 'Toshkent', ru: 'Ташкент', en: 'Tashkent' };
 const placeName = (p: (typeof PLACES)[number]) => ({ name: p.name[lang], address: `${p.district[lang]}, ${CITY[lang]}`, lat: p.lat, lng: p.lng });
 const cls = (code: string) => CLASSES.find((c) => c.code === code) ?? CLASSES[0]!;
 
-function offersFor(r: Row) {
-  const ref = reference(r.route, cls(r.classCode));
-  return DRIVERS.map((d, i) => ({
-    id: `00000000-0000-4000-8000-00000000000${i}`, status: r.chosenOffer === i ? 'chosen' : 'open',
-    priceTiyin: round500(ref * d.share), expiresAt: iso(now() + 30_000), driverName: d.name, rating: d.rating,
-    makeModel: d.car, color: d.color[lang], distanceM: d.pickupMin * 400, pickupMin: d.pickupMin,
-  }));
-}
-
 /** Moves the ride along in time: assignment, the car driving to the pickup, the trip, the 60% charge. */
 function tick(r: Row) {
   const t = now();
+  if (r.status === 'created' && !r.assignAt && !r.proposal && !r.proposeAt && t >= r.searchDeadline) {
+    r.cancelledBy = 'system'; r.cancelReason = 'no_drivers'; finish(r, 'cancelled'); return;
+  }
   if (r.status === 'created' && r.assignAt && t >= r.assignAt) {
     r.status = 'driver_en_route'; r.acceptedAt = t; r.arriveAt = t + 22_000;
     const d = r.driver;
     r.carFrom = { lat: r.stops[0].lat + 0.006, lng: r.stops[0].lng + 0.005 };
     d.pickupMin = d.pickupMin ?? 4;
   }
-  if (r.status === 'created' && r.mode === 'auto' && r.proposeAt && t >= r.proposeAt && !r.proposal && !r.assignAt) {
-    r.proposal = r.maxPriceTiyin + 200_000;
+  if (r.status === 'created' && r.proposeAt && t >= r.proposeAt && !r.proposal && !r.assignAt) {
+    r.proposal = round500(reference(r.route, cls(r.classCode)) * (r.fallbackDriver?.share ?? 0.9));
   }
   if (r.status === 'driver_en_route' && t >= r.arriveAt) { r.status = 'arrived'; r.arrivedAt = r.arriveAt; r.startAt = r.arrivedAt + 30_000; }
   if (r.status === 'arrived' && t >= r.startAt) { r.status = 'in_progress'; r.tripStart = r.startAt; r.tripMs = 45_000; }
@@ -127,7 +138,7 @@ function finish(r: Row, status: 'completed' | 'cancelled') {
 function rideView(r: Row) {
   tick(r);
   const v: Row = {
-    id: r.id, status: r.status, mode: r.mode, classCode: r.classCode, priceTiyin: r.status === 'created' ? null : r.priceTiyin,
+    id: r.id, status: r.status, mode: r.mode, priority: r.priority ?? null, classCode: r.classCode, priceTiyin: r.status === 'created' ? null : r.priceTiyin,
     route: r.route, stops: r.stops.map((s: Row, i: number) => ({ position: i, lat: s.lat, lng: s.lng, address: s.address ?? null, entrance: i === 0 ? s.entrance ?? null : null })),
     options: r.options, comment: r.comment, cancelledBy: r.cancelledBy ?? null, cancelReason: r.cancelReason ?? null,
     cancelFee: r.cancelFee ? { amountTiyin: r.cancelFee, status: 'pending' } : null,
@@ -139,10 +150,10 @@ function rideView(r: Row) {
     createdAt: iso(r.createdAt),
   };
   if (r.status === 'created') {
-    if (r.mode === 'auto') {
+    {
       v.maxPriceTiyin = r.maxPriceTiyin; v.searchDeadline = iso(r.searchDeadline);
       v.dispatch = r.proposal ? { state: 'needs_confirmation', priceTiyin: r.proposal } : { state: r.assignAt ? 'waiting_driver' : 'searching' };
-    } else v.offers = offersFor(r);
+    }
   }
   if (r.driver && r.status !== 'created') {
     const d = r.driver;
@@ -262,10 +273,9 @@ export async function mockApi(method: string, rawPath: string, body: any): Promi
       route: r,
       classes: CLASSES.map((c) => {
         const ref = reference(r, c);
-        const prices = DRIVERS.map((d) => ({ price: round500(ref * d.share), min: d.pickupMin }));
-        const best = c.code === 'business' ? null : prices[0]!;
+        const options = optionsFor(c.code, ref);
         return { code: c.code, name: c.name[lang], seats: c.seats, maxFareTiyin: ref, minFareTiyin: round500(ref * 0.8), coefficient: c.coefficient,
-          best: best ? { priceTiyin: best.price, pickupMin: best.min } : null, driversNearby: best ? DRIVERS.length : 0 };
+          options: options.map(({ driver: _d, ...o }) => o), driversNearby: DRIVERS.filter((d) => d.cls === c.code).length };
       }),
     });
   }
@@ -312,12 +322,13 @@ export async function mockApi(method: string, rawPath: string, body: any): Promi
       stops: body.stops.map((s: Row, i: number) => ({ lat: s.lat, lng: s.lng, address: s.address, entrance: i === 0 ? (s.entranceLabel ?? (s.entranceId ? String(Number(s.entranceId.slice(-1))) : null)) : null })),
       paymentMethod: body.paymentMethod ?? 'cash', cardId: card?.id ?? null, paidTiyin: 0, searchDeadline: now() + 90_000,
     };
-    if (body.mode === 'auto') {
-      r.maxPriceTiyin = body.maxPriceTiyin;
-      // The first one-tap order shows the honest "only a pricier driver is left" question.
-      if (state.firstAuto && c.code === 'economy') { state.firstAuto = false; r.proposeAt = now() + 3500; }
-      else { r.assignAt = now() + 4000; r.priceTiyin = body.maxPriceTiyin; r.driver = { ...DRIVERS[0] }; }
-    }
+    r.maxPriceTiyin = body.maxPriceTiyin; r.priority = body.priority ?? 'fast';
+    const pick = optionsFor(c.code, reference(r0, c)).find((o) => o.priority === r.priority) ?? optionsFor(c.code, reference(r0, c))[0];
+    // The first "cheaper" order in the demo shows the honest "only a pricier driver is left" question.
+    if (state.firstAuto && r.priority === 'cheap' && pick) { state.firstAuto = false; r.proposeAt = now() + 3500; r.fallbackDriver = DRIVERS.find((d) => d.name === 'Dilshod'); }
+    else if (pick) { r.assignAt = now() + 4000; r.priceTiyin = Math.min(pick.priceTiyin, body.maxPriceTiyin); r.driver = { ...pick.driver }; }
+    // No car of this class: the search runs out after the window (shortened for the demo).
+    else r.searchDeadline = now() + 20_000;
     state.rides.set(id, r); state.activeId = id;
     return ok(rideView(r), 201);
   }
@@ -351,17 +362,9 @@ export async function mockApi(method: string, rawPath: string, body: any): Promi
   tick(r);
 
   if (method === 'GET' && sub === '') return ok(rideView(r));
-  if (method === 'POST' && sub === '/search') return ok(offersFor(r));
-  if (method === 'POST' && sub === '/choose') {
-    const i = Number(String(body.offerId).slice(-1));
-    const o = offersFor(r)[i];
-    if (!o) return fail(409, 'offer_unavailable');
-    r.chosenOffer = i; r.priceTiyin = o.priceTiyin; r.driver = { ...DRIVERS[i] }; r.assignAt = now() + 3500;
-    return ok(rideView(r));
-  }
   if (method === 'POST' && sub === '/confirm-price') {
     if (r.proposal !== body.priceTiyin) return fail(409, 'price_changed');
-    r.maxPriceTiyin = r.proposal; r.priceTiyin = r.proposal; r.proposal = null; r.driver = { ...DRIVERS[3] }; r.assignAt = now() + 3000;
+    r.maxPriceTiyin = r.proposal; r.priceTiyin = r.proposal; r.proposal = null; r.driver = { ...(r.fallbackDriver ?? DRIVERS[1]) }; r.assignAt = now() + 3000;
     return ok(rideView(r));
   }
   if (method === 'POST' && sub === '/payment') {

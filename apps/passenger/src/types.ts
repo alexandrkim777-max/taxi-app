@@ -10,8 +10,11 @@ export interface Stop extends LatLng { address: string; entranceId?: string; ent
 
 export interface QuoteClass {
   code: string; name: string; seats: number; maxFareTiyin: number; minFareTiyin: number; coefficient: number;
-  best: { priceTiyin: number; pickupMin: number } | null; driversNearby: number;
+  /** "Cheaper" and "faster", or one option when they would be the same, or none when no car is free. */
+  options: QuoteOption[]; driversNearby: number;
 }
+export type Priority = 'cheap' | 'fast';
+export interface QuoteOption { priority: Priority; priceTiyin: number; pickupMin: number }
 export interface Quote { route: { distanceM: number; durationS: number }; classes: QuoteClass[] }
 
 export interface Card { id: string; provider: string; panMasked: string; expiry: string; isDefault: boolean }
@@ -29,7 +32,7 @@ export interface Waiting {
 export type RideStatus = 'created' | 'accepted' | 'driver_en_route' | 'arrived' | 'in_progress' | 'completed' | 'cancelled';
 
 export interface Ride {
-  id: string; status: RideStatus; mode: 'auto' | 'choose'; classCode: string; priceTiyin: number | null;
+  id: string; status: RideStatus; mode: 'auto' | 'choose'; priority: Priority | null; classCode: string; priceTiyin: number | null;
   route: { distanceM: number; durationS: number };
   stops: (LatLng & { position: number; address: string | null; entrance: string | null })[];
   options: Record<string, boolean>; comment: string | null;

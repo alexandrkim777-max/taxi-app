@@ -14,6 +14,8 @@ export interface RouteResult {
 export interface RouteProvider {
   /** Route through the points in order (pickup, optional stops, destination). */
   route(points: LatLng[]): Promise<RouteResult>;
+  /** Driving time in seconds from each of `from` to `to` (drivers to the pickup). */
+  durationsTo(from: LatLng[], to: LatLng): Promise<number[]>;
 }
 
 const EARTH_RADIUS_M = 6_371_000;
@@ -38,6 +40,10 @@ export class EstimateRouteProvider implements RouteProvider {
     const durationS = Math.round(distanceM / (22_000 / 3600)); // ~22 km/h in city traffic
     return { distanceM, durationS };
   }
+
+  async durationsTo(from: LatLng[], to: LatLng): Promise<number[]> {
+    return from.map((f) => Math.round((haversineM(f, to) * 1.35) / (22_000 / 3600)));
+  }
 }
 
 /** Self-hosted OSRM on OpenStreetMap data. The base URL comes from config, never from users. */
@@ -59,6 +65,24 @@ export class OsrmRouteProvider implements RouteProvider {
       throw new Error('OSRM returned no route');
     }
     return { distanceM: Math.round(best.distance), durationS: Math.round(best.duration) };
+  }
+
+  /** OSRM table service: many drivers to one pickup in a single request. */
+  async durationsTo(from: LatLng[], to: LatLng): Promise<number[]> {
+    if (from.length === 0) return [];
+    const coords = [...from, to].map((p) => `${p.lng.toFixed(6)},${p.lat.toFixed(6)}`).join(';');
+    const sources = from.map((_, i) => i).join(';');
+    const res = await fetch(`${this.baseUrl}/table/v1/driving/${coords}?sources=${sources}&destinations=${from.length}&annotations=duration`, {
+      signal: AbortSignal.timeout(3000),
+    });
+    if (!res.ok) throw new Error(`OSRM responded ${res.status}`);
+    const body = (await res.json()) as { code?: string; durations?: (number | null)[][] };
+    if (body.code !== 'Ok' || !body.durations || body.durations.length !== from.length) throw new Error('OSRM returned no table');
+    return body.durations.map((row) => {
+      const d = row[0];
+      if (d === null || d === undefined || !Number.isFinite(d)) throw new Error('OSRM: unreachable point');
+      return Math.round(d);
+    });
   }
 }
 

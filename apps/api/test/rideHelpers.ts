@@ -88,3 +88,11 @@ export async function clearMap(): Promise<void> {
   await db.query(`UPDATE ride_offers SET status = 'expired' WHERE status IN ('open', 'chosen')`);
   await db.query(`UPDATE rides SET status = 'cancelled', cancelled_by = 'system', cancel_reason = 'test_cleanup' WHERE status = 'created'`);
 }
+
+/** Puts the driver's tariff at the bottom of the corridor (20% below the recommended price). */
+export async function setFloorTariff(s: Setup, driver: Headers): Promise<void> {
+  const t = (await s.app.inject({ method: 'GET', url: '/drivers/me/tariff', headers: driver })).json();
+  const floor = Object.fromEntries(Object.entries(t.bounds).map(([k, b]) => [k, (b as { min: number }).min]));
+  const res = await s.app.inject({ method: 'PUT', url: '/drivers/me/tariff', headers: driver, payload: floor });
+  assert.equal(res.statusCode, 200, res.body);
+}

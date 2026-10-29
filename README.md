@@ -57,12 +57,12 @@ Tests: `npm test` (the API integration tests need a migrated database at `DATABA
 | GET | `/classes` | anyone | Vehicle classes with recommended tariff and price corridor |
 | GET | `/drivers/me/tariff` | verified driver | Current tariff (or recommended), allowed bounds per component |
 | PUT | `/drivers/me/tariff` | verified driver | New tariff version inside the corridor, at most once per 24 h |
-| POST | `/quotes` | user | Route for 2–5 stops; per class the price range and the one-tap price (best nearby driver, pickup minutes) |
+| POST | `/quotes` | user | Route for 2–5 stops; per class the price range and up to two options, "cheaper" and "faster", each with price and ≈ pickup minutes |
 | POST | `/drivers/me/online` | verified driver | Goes on the line (needs an active subscription) |
 | POST | `/drivers/me/location` | driver on the line | Position ping every 3–5 s |
 | POST | `/drivers/me/offline` | driver | Leaves the line (not during a ride) |
 | GET | `/drivers/me/requests` | driver | Pending requests: 15 s to accept (one tap), 30 s (passenger's own pick) |
-| POST | `/rides` | user | `mode: auto` (default, one tap with `maxPriceTiyin` from the quote) or `mode: choose` (list of drivers) |
+| POST | `/rides` | user | `priority: cheap \| fast` with `maxPriceTiyin` from the chosen option (the app's only way); `mode: choose` (list) remains API-only |
 | POST | `/rides/:id/search` | passenger | List mode: refreshes the offers |
 | POST | `/rides/:id/choose` | passenger | List mode: chooses an offer |
 | POST | `/rides/:id/confirm-price` | passenger | One tap: accepts a higher price proposed when only pricier drivers are left |
@@ -121,9 +121,9 @@ npm run build:demo                      # clickable web demo with a pretend serv
 - Language first (uz / ru / en), SMS login.
 - Map with the pickup pin (drag the map to move it), "Where to?" search on our own geocoder, home / work /
   saved places, recent destinations.
-- Order: entrance chips (learnt from earlier pickups) or a typed entrance number, extra stops, class with
-  the one-tap price and pickup time, or "choose a driver" with each driver's own price; an admin
-  coefficient other than 1 is shown openly; cash or a saved card; wishes and a note.
+- Order: entrance chips (learnt from earlier pickups) or a typed entrance number, extra stops, the class,
+  then "Cheaper" or "Faster" (or one "Best option") with price and ≈ pickup time; an admin coefficient
+  other than 1 is shown openly; cash or a saved card; wishes and a note behind one tap.
 - Searching; "only a pricier driver is left" asks for consent; the driver card (rating, what passengers
   liked, car, plate), the car moving on the map, free / paid waiting, trip progress.
 - Add a stop or change the destination: the new price is shown and applied only after confirming.
@@ -186,18 +186,29 @@ Security measures: see [SECURITY.md](SECURITY.md).
 Every nearby free driver of the class (up to 10, within their pickup radius, max 5 km) is priced
 by **their own tariff**, clamped into the corridor. Then one of two modes:
 
-**One tap (default, like Yandex).** The order button shows one price and pickup time: the best
-nearby driver, weighing price and pickup time (1 minute of pickup = 1 000 sum). That price is the
-passenger's ceiling.
-1. The ride goes to the best driver at or below the ceiling; they have 15 s to accept.
-2. On decline or silence it goes to the next one. A driver gets one request at a time and is
-   never sent the same ride twice.
+**The passenger's choice (the MVP's core rule).** Four classes: Economy, Comfort, Business, Minivan.
+For the chosen class the passenger sees at most two options, each with its total price and an
+estimated pickup time (road time from the car's position by our OSRM, shown as "≈", never promised):
+
+- **Cheaper** — lowest price among cars at most 15 minutes away (a pickup minute counts like 200 sum,
+  so price decides).
+- **Faster** — the nearest car (a pickup minute counts like 3 000 sum); the price may be a bit higher.
+- Each rating point below 5.0 counts like 2 000 sum in both, so with similar price and pickup the
+  better-rated driver wins.
+- When the two would be the same driver, under 1 000 sum apart, or under 2 minutes apart, only one
+  card is shown: **Best option**. No free car of the class: the app says so and offers to keep
+  searching for up to 5 minutes at most at the recommended price.
+
+There is no list of drivers, no bidding and no counter-offers. The price of the chosen option is the
+passenger's ceiling:
+1. The ride goes to the best driver by the chosen rule at or below the ceiling; they have 15 s to accept.
+2. On decline or silence it goes to the next one by the same rule. A driver gets one request at a
+   time and is never sent the same ride twice.
 3. If only more expensive drivers are left, the passenger sees the new price and must confirm it.
-   Nothing is ever charged above what the passenger agreed to.
+   Nothing is ever charged above what the passenger agreed to; the final price can be lower.
 4. No driver within 5 minutes: the system cancels with `no_drivers`.
 
-**Choose a driver (list).** The passenger sees model, colour, rating, distance and price — not the
-plate or exact position — and picks one; the driver has 30 s to accept.
+The API still has a "choose from a list" mode (`mode: choose`), but the passenger app does not offer it.
 
 On acceptance the price is copied into the ride and locked; the passenger then sees the plate and
 the driver's live position until the ride ends. A dispatcher loop (every 2 s, safe on several

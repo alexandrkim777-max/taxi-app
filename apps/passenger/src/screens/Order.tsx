@@ -1,21 +1,25 @@
-// Composing the order: pickup with entrance, destination and stops, class with the one-tap price,
-// one tap or choose a driver, payment, wishes. Prices come from /quotes; nothing is priced on the phone.
+// Composing the order, kept simple: the class, then "Cheaper" or "Faster" (or one "Best option"
+// when they would be the same), payment, confirm. The passenger never sees drivers' tariffs or a
+// list of drivers: the server picks the driver by the chosen rule and never charges more than shown.
 
 import { useEffect, useState } from 'react';
 import { Pressable, ScrollView, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { api, ApiError } from '../api';
 import { useApp } from '../context';
-import { km, money, moneyRange } from '../format';
+import { km, money } from '../format';
 import { Map } from '../map/Map';
 import type { MapPin } from '../map/types';
 import { useRide } from '../ride';
 import { radius, space, useTheme } from '../theme';
-import type { Card, Entrance, Quote, Ride, Stop } from '../types';
-import { Button, Chip, Divider, ErrorNote, Field, Header, Pill, Row, Seg, T } from '../components/ui';
+import type { Card, Entrance, Priority, Quote, QuoteClass, Ride, Stop } from '../types';
+import { Button, Card as Box, Chip, Divider, ErrorNote, Field, Header, Pill, Row, T } from '../components/ui';
 
 const OPTIONS = ['childSeat', 'pet', 'quiet', 'luggage'] as const;
 const MAX_STOPS = 4; // plus the pickup: 5 points, as the API allows
+
+/** What the order button will send: a rule and the price agreed to. */
+interface Choice { priority: Priority; priceTiyin: number }
 
 export function OrderScreen() {
   const { t, lang, draft, setDraft, push, pop, reset, err } = useApp();
@@ -25,11 +29,12 @@ export function OrderScreen() {
   const stops = draft.stops;
   const [quote, setQuote] = useState<Quote | null>(null);
   const [cls, setCls] = useState('economy');
-  const [mode, setMode] = useState<'auto' | 'choose'>('auto');
+  const [choice, setChoice] = useState<Choice | null>(null);
   const [entrances, setEntrances] = useState<Entrance[]>([]);
   const [typing, setTyping] = useState(false);
   const [cards, setCards] = useState<Card[]>([]);
   const [pay, setPay] = useState<{ method: 'cash' } | { method: 'card'; cardId: string }>({ method: 'cash' });
+  const [wishesOpen, setWishesOpen] = useState(false);
   const [options, setOptions] = useState<Record<string, boolean>>({});
   const [comment, setComment] = useState('');
   const [busy, setBusy] = useState(false);
@@ -37,13 +42,19 @@ export function OrderScreen() {
 
   const points = [pickup, ...stops];
   const routeKey = points.map((p) => `${p.lat.toFixed(5)},${p.lng.toFixed(5)}`).join('|');
+  const current: QuoteClass | null = quote?.classes.find((x) => x.code === cls) ?? null;
 
+  const loadQuote = () => api<Quote>('/quotes', { body: { stops: points.map((p) => ({ lat: p.lat, lng: p.lng })) } });
   useEffect(() => {
     setQuote(null); setError(null);
-    api<Quote>('/quotes', { body: { stops: points.map((p) => ({ lat: p.lat, lng: p.lng })) } })
-      .then((q) => { setQuote(q); if (!q.classes.some((x) => x.code === cls) && q.classes[0]) setCls(q.classes[0].code); })
-      .catch((e) => setError(err(e)));
+    loadQuote().then(setQuote).catch((e) => setError(err(e)));
   }, [routeKey]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // A new quote or class: preselect the first option ("Cheaper", or the only one).
+  useEffect(() => {
+    const first = current?.options[0];
+    setChoice(first ? { priority: first.priority, priceTiyin: first.priceTiyin } : null);
+  }, [current]);
 
   useEffect(() => {
     api<Entrance[]>(`/geo/entrances?lat=${pickup.lat.toFixed(5)}&lng=${pickup.lng.toFixed(5)}`).then(setEntrances).catch(() => setEntrances([]));
@@ -57,20 +68,16 @@ export function OrderScreen() {
   useEffect(() => { loadCards(); }, []);
 
   const setPickup = (patch: Partial<Stop>) => setDraft((d) => ({ ...d, pickup: { ...d.pickup!, ...patch } }));
-  const chosenClass = quote?.classes.find((x) => x.code === cls) ?? null;
-  // One tap: the passenger agrees to the best price shown; with nobody nearby, to the class's top price.
-  const ceiling = chosenClass ? chosenClass.best?.priceTiyin ?? chosenClass.maxFareTiyin : null;
 
-  async function order() {
-    if (!chosenClass) return;
+  async function order(ch: Choice) {
     setBusy(true); setError(null);
     try {
       const ride = await api<Ride>('/rides', {
         body: {
-          classCode: cls, mode, stops: points.map(({ lat, lng, address, entranceId, entranceLabel }) => ({
+          classCode: cls, mode: 'auto', priority: ch.priority, maxPriceTiyin: ch.priceTiyin,
+          stops: points.map(({ lat, lng, address, entranceId, entranceLabel }) => ({
             lat, lng, address, ...(entranceId ? { entranceId } : {}), ...(entranceLabel ? { entranceLabel } : {}),
           })),
-          ...(mode === 'auto' ? { maxPriceTiyin: ceiling } : {}),
           paymentMethod: pay.method, ...(pay.method === 'card' ? { cardId: pay.cardId } : {}),
           options, ...(comment.trim() ? { comment: comment.trim() } : {}),
         },
@@ -80,6 +87,8 @@ export function OrderScreen() {
       reset();
     } catch (e) {
       if (e instanceof ApiError && e.code === 'unpaid_debt') push({ name: 'debts' });
+      // The price moved since the quote (a driver changed their tariff): fetch fresh options.
+      if (e instanceof ApiError && e.code === 'price_out_of_range') loadQuote().then(setQuote).catch(() => {});
       setError(err(e));
     } finally { setBusy(false); }
   }
@@ -91,10 +100,15 @@ export function OrderScreen() {
     ...stops.map((s, i): MapPin => ({ id: `s${i}`, kind: i === stops.length - 1 ? 'dropoff' : 'stop', lat: s.lat, lng: s.lng })),
   ];
 
+  const opts = current?.options ?? [];
+  const noCars = !!current && opts.length === 0;
+  // Nobody free right now: the passenger may still search for up to 5 minutes at the class's top price.
+  const toSend: Choice | null = noCars && current ? { priority: 'fast', priceTiyin: current.maxFareTiyin } : choice;
+
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: c.surfacePage }} edges={['top', 'left', 'right', 'bottom']}>
       <View style={{ paddingHorizontal: space.s5, paddingTop: space.s2 }}><Header title={t.orderAt} onBack={pop} /></View>
-      <View style={{ height: 210, marginHorizontal: space.s5, borderRadius: radius.lg, overflow: 'hidden' }}>
+      <View style={{ height: 180, marginHorizontal: space.s5, borderRadius: radius.lg, overflow: 'hidden' }}>
         <Map pins={pins} line={points} onPinPress={(p) => {
           if (p.kind !== 'entrance') return;
           const e = entrances.find((x) => `e${x.id}` === p.id);
@@ -146,35 +160,48 @@ export function OrderScreen() {
 
         <Divider />
 
-        {/* How to find a driver */}
-        <Seg value={mode} onChange={setMode} options={[{ value: 'auto', label: t.oneTap }, { value: 'choose', label: t.chooseDriver }]} />
-        <T v="caption" muted>{mode === 'auto' ? t.oneTapHint : t.chooseDriverHint}</T>
-
-        {/* Classes */}
+        {/* Class */}
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: space.s2 }}>
-          {(quote?.classes ?? []).map((q) => {
-            const on = q.code === cls;
-            return (
-              <Pressable key={q.code} accessibilityRole="radio" accessibilityState={{ selected: on }} onPress={() => setCls(q.code)}
-                style={{ width: 184, borderRadius: radius.lg, padding: space.s3, gap: 2, borderWidth: on ? 2 : 1, borderColor: on ? c.brand : c.border, backgroundColor: c.surfaceCard }}>
-                <T v="bodyStrong">{q.name}</T>
-                {mode === 'auto' && q.best
-                  ? <T v="price">{money(q.best.priceTiyin, lang)}</T>
-                  : <T v="bodyStrong" numberOfLines={1} style={{ fontSize: 14 }}>{moneyRange(q.minFareTiyin, q.maxFareTiyin, lang)}</T>}
-                <T v="caption" muted>{q.best ? `${q.best.pickupMin} ${t.min} ${t.pickupIn}` : t.noDriversNow}</T>
-              </Pressable>
-            );
-          })}
-          {!quote && !error && <T muted>…</T>}
+          {(quote?.classes ?? []).map((q) => (
+            <Chip key={q.code} label={q.seats > 4 ? `${q.name} · ${q.seats} ${t.seats}` : q.name} selected={q.code === cls} onPress={() => setCls(q.code)} />
+          ))}
         </ScrollView>
-        {chosenClass && chosenClass.coefficient !== 1 && (
-          <Pill tone={chosenClass.coefficient > 1 ? 'warm' : 'ok'}>
-            {chosenClass.coefficient > 1 ? t.coefficient : t.coefficientLow} ×{chosenClass.coefficient.toFixed(2).replace('.', ',')}
+
+        {/* Cheaper / Faster */}
+        {!quote && !error && <T muted>…</T>}
+        {opts.map((o) => {
+          const on = choice?.priority === o.priority;
+          const single = opts.length === 1;
+          const title = single ? t.bestOption : o.priority === 'cheap' ? t.cheaper : t.faster;
+          const hint = single ? t.bestHint : o.priority === 'cheap' ? t.cheaperHint : t.fasterHint;
+          return (
+            <Pressable key={o.priority} accessibilityRole="radio" accessibilityState={{ selected: on }}
+              onPress={() => setChoice({ priority: o.priority, priceTiyin: o.priceTiyin })}
+              style={{ borderRadius: radius.lg, padding: space.s4, gap: 2, borderWidth: on ? 2 : 1, borderColor: on ? c.brand : c.border, backgroundColor: c.surfaceCard }}>
+              <Row style={{ justifyContent: 'space-between', flexWrap: 'nowrap' }}>
+                <T v="heading">{title}</T>
+                <T v="price">{money(o.priceTiyin, lang)}</T>
+              </Row>
+              <Row style={{ justifyContent: 'space-between', flexWrap: 'nowrap' }}>
+                <T v="caption" muted style={{ flex: 1 }}>{hint}</T>
+                <T v="bodyStrong">{t.pickupApprox} {o.pickupMin} {t.min}</T>
+              </Row>
+            </Pressable>
+          );
+        })}
+        {noCars && current && (
+          <Box tone="warm">
+            <T v="bodyStrong" color={c.warmInk}>{t.noCarsClass}</T>
+            <T color={c.warmInk}>{t.priceAtMost} {money(current.maxFareTiyin, lang)}</T>
+          </Box>
+        )}
+        {current && current.coefficient !== 1 && (
+          <Pill tone={current.coefficient > 1 ? 'warm' : 'ok'}>
+            {current.coefficient > 1 ? t.coefficient : t.coefficientLow} ×{current.coefficient.toFixed(2).replace('.', ',')}
           </Pill>
         )}
 
         {/* Payment */}
-        <T v="label" muted>{t.payment}</T>
         <Row>
           <Chip label={t.cash} selected={pay.method === 'cash'} onPress={() => setPay({ method: 'cash' })} />
           {cards.map((card) => (
@@ -184,17 +211,21 @@ export function OrderScreen() {
           <Chip label={`+ ${t.addCard}`} onPress={() => push({ name: 'addCard', onAdded: (card) => { loadCards(); setPay({ method: 'card', cardId: card.id }); } })} />
         </Row>
 
-        {/* Wishes */}
-        <T v="label" muted>{t.options}</T>
-        <Row>
-          {OPTIONS.map((o) => <Chip key={o} label={t[o]} selected={!!options[o]} onPress={() => setOptions((x) => ({ ...x, [o]: !x[o] }))} />)}
-        </Row>
-        <Field label={t.comment} value={comment} onChangeText={setComment} maxLength={300} />
+        {/* Wishes: hidden until asked for, to keep the screen short */}
+        <Pressable accessibilityRole="button" onPress={() => setWishesOpen((x) => !x)} style={{ minHeight: 44, justifyContent: 'center' }}>
+          <T v="bodyStrong" color={c.link}>{wishesOpen ? '−' : '+'} {t.wishes}{Object.values(options).some(Boolean) || comment ? ' •' : ''}</T>
+        </Pressable>
+        {wishesOpen && (
+          <>
+            <Row>{OPTIONS.map((o) => <Chip key={o} label={t[o]} selected={!!options[o]} onPress={() => setOptions((x) => ({ ...x, [o]: !x[o] }))} />)}</Row>
+            <Field label={t.comment} value={comment} onChangeText={setComment} maxLength={300} />
+          </>
+        )}
         <ErrorNote text={error} />
       </ScrollView>
       <View style={{ paddingHorizontal: space.s5, paddingBottom: space.s3 }}>
-        <Button busy={busy} disabled={!chosenClass} onPress={order}
-          title={mode === 'auto' ? `${t.order}${ceiling ? ` · ${money(ceiling, lang)}` : ''}` : t.chooseDriver} />
+        <Button busy={busy} disabled={!toSend} onPress={() => toSend && order(toSend)}
+          title={noCars ? t.searchAnyway : toSend ? `${t.order} · ${money(toSend.priceTiyin, lang)}` : t.order} />
       </View>
     </SafeAreaView>
   );

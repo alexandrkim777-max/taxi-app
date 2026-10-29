@@ -2,10 +2,10 @@ import type { FastifyInstance } from 'fastify';
 import type pg from 'pg';
 import { clampToCorridor, scaledFareTiyin, type Tariff } from '@taxi/shared';
 import { requireUser } from '../auth/session.ts';
-import type { RouteProvider } from '../routing/index.ts';
+import { EstimateRouteProvider, type RouteProvider } from '../routing/index.ts';
 import { uzPoint } from '../lib/geo.ts';
 import { langOf, pick } from '../lib/i18n.ts';
-import { bestOf, pickupMin, pricedDrivers } from '../dispatch/matching.ts';
+import { optionsOf, pricedDrivers, type PricedDriver } from '../dispatch/matching.ts';
 
 const TARIFF_CHANGE_COOLDOWN_HOURS = 24;
 
@@ -177,6 +177,21 @@ export async function tariffRoutes(app: FastifyInstance, { db, routes, cityCode 
     },
   );
 
+  /**
+   * Pickup minutes for each driver by road (our OSRM). If routing is down, the straight-line estimate
+   * is used instead: the quote still works, the minutes are just rougher.
+   */
+  async function pickupEtas(drivers: PricedDriver[], pickup: { lat: number; lng: number }): Promise<Map<string, number>> {
+    let seconds: number[];
+    try {
+      seconds = await routes.durationsTo(drivers.map((d) => ({ lat: d.lat, lng: d.lng })), pickup);
+    } catch (err) {
+      app.log.warn({ err }, 'pickup ETA routing failed; using the estimate');
+      seconds = await new EstimateRouteProvider().durationsTo(drivers.map((d) => ({ lat: d.lat, lng: d.lng })), pickup);
+    }
+    return new Map(drivers.map((d, i) => [d.driverId, Math.max(1, Math.ceil(seconds[i]! / 60))]));
+  }
+
   app.post<{ Body: { stops: { lat: number; lng: number }[] } }>(
     '/quotes',
     {
@@ -208,18 +223,20 @@ export async function tariffRoutes(app: FastifyInstance, { db, routes, cityCode 
           const corridor = { minPct: c.corridor_min_pct, maxPct: c.corridor_max_pct };
           // Price range drivers of this class can charge for this route.
           const floor = clampToCorridor(0, rec, corridor);
-          // The one-tap price: the best nearby driver right now (price and pickup time together).
-          // The app shows it on the "Order" button and sends it back as the ceiling.
+          // "Cheaper" and "faster": the driver each rule would pick right now, with their own price.
+          // The app shows these prices on the cards and sends the chosen one back as the ceiling.
           const drivers = await pricedDrivers(db, {
             lat: pickup.lat, lng: pickup.lng, route, excludeUserId: request.user!.id,
             cls: { classId: c.id, recommended: recommended(c), corridor, coefficient },
           });
-          const best = bestOf(drivers);
+          const eta = await pickupEtas(drivers, pickup);
+          const options = optionsOf(drivers, (d) => eta.get(d.driverId)!);
           return {
             code: c.code, name: pick(c.name, langOf(request)), seats: c.seats, maxFareTiyin: rec, minFareTiyin: floor,
             // Shown openly in the app when it is not 1 (honest pricing).
             coefficient,
-            best: best ? { priceTiyin: best.priceTiyin, pickupMin: pickupMin(best.distanceM) } : null,
+            // An estimate, not a promise: road time from the car's current position.
+            options: options.map((o) => ({ priority: o.priority, priceTiyin: o.driver.priceTiyin, pickupMin: eta.get(o.driver.driverId)! })),
             driversNearby: drivers.length,
           };
         })),

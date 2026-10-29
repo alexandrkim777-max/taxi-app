@@ -5,7 +5,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { db, randomPhone, setup, skip, verifiedDriver, type Setup } from './helpers.ts';
-import { acceptedRide, clearMap, createRide, drive, north, offerOf, onlineDriver, passenger, randomSpot, type Headers } from './rideHelpers.ts';
+import { acceptedRide, clearMap, createRide, drive, north, offerOf, onlineDriver, passenger, randomSpot, setFloorTariff, type Headers } from './rideHelpers.ts';
 import { dispatchTick } from '../src/dispatch/matching.ts';
 
 test('full ride: offer, choice, acceptance with locked price, status flow', { skip }, async () => {
@@ -276,13 +276,6 @@ test('races: parallel orders and parallel acceptances', { skip }, async () => {
 // ---------------------------------------------------------------------------
 // One-tap ordering (auto mode)
 
-async function setFloorTariff(s: Setup, driver: Headers): Promise<void> {
-  const t = (await s.app.inject({ method: 'GET', url: '/drivers/me/tariff', headers: driver })).json();
-  const floor = Object.fromEntries(Object.entries(t.bounds).map(([k, b]) => [k, (b as { min: number }).min]));
-  const res = await s.app.inject({ method: 'PUT', url: '/drivers/me/tariff', headers: driver, payload: floor });
-  assert.equal(res.statusCode, 200, res.body);
-}
-
 async function quote(s: Setup, auth: Headers, spot: { lat: number; lng: number }) {
   const res = await s.app.inject({ method: 'POST', url: '/quotes', headers: auth, payload: { stops: [spot, north(spot, 6000)] } });
   assert.equal(res.statusCode, 200, res.body);
@@ -308,11 +301,11 @@ test('one tap: best price shown, sent to that driver, price locked', { skip }, a
   const pax = await passenger(s);
 
   const q = await quote(s, pax, spot);
-  assert.ok(q.best, 'a driver is around');
-  assert.equal(q.best.pickupMin >= 1, true);
-  assert.ok(q.best.priceTiyin <= q.maxFareTiyin);
+  assert.equal(q.options.length, 1, 'one driver around: one option');
+  assert.equal(q.options[0].pickupMin >= 1, true);
+  assert.ok(q.options[0].priceTiyin <= q.maxFareTiyin);
 
-  const res = await orderAuto(s, pax, spot, q.best.priceTiyin);
+  const res = await orderAuto(s, pax, spot, q.options[0].priceTiyin);
   assert.equal(res.statusCode, 201, res.body);
   const ride = res.json();
   assert.equal(ride.mode, 'auto');
@@ -325,7 +318,7 @@ test('one tap: best price shown, sent to that driver, price locked', { skip }, a
 
   const accepted = await s.app.inject({ method: 'POST', url: `/rides/${ride.id}/accept`, headers: driver });
   assert.equal(accepted.statusCode, 200, accepted.body);
-  assert.equal(accepted.json().priceTiyin, q.best.priceTiyin, 'the price on the button is the price of the ride');
+  assert.equal(accepted.json().priceTiyin, q.options[0].priceTiyin, 'the price on the button is the price of the ride');
   await s.app.close();
 });
 
@@ -342,7 +335,7 @@ test('one tap: decline and timeout move to the next driver, never above the ceil
   const pax = await passenger(s);
 
   const q = await quote(s, pax, spot);
-  const ride = (await orderAuto(s, pax, spot, q.best.priceTiyin)).json();
+  const ride = (await orderAuto(s, pax, spot, q.options[0].priceTiyin)).json();
   assert.equal((await requestsOf(s, cheapNear)).length, 1, 'best driver first');
   assert.equal((await requestsOf(s, second)).length, 0, 'one driver at a time');
 
@@ -358,7 +351,7 @@ test('one tap: decline and timeout move to the next driver, never above the ceil
 
   const accepted = await s.app.inject({ method: 'POST', url: `/rides/${ride.id}/accept`, headers: third });
   assert.equal(accepted.statusCode, 200, accepted.body);
-  assert.ok(accepted.json().priceTiyin <= q.best.priceTiyin, 'never more than agreed');
+  assert.ok(accepted.json().priceTiyin <= q.options[0].priceTiyin, 'never more than agreed');
 
   const events = await db.query(`SELECT type FROM ride_events WHERE ride_id = $1 ORDER BY id`, [ride.id]);
   assert.deepEqual(events.rows.map((e) => e.type), [
@@ -377,7 +370,7 @@ test('one tap: a higher price needs the passenger\'s explicit confirmation', { s
   const pax = await passenger(s);
 
   const q = await quote(s, pax, spot);
-  const ride = (await orderAuto(s, pax, spot, q.best.priceTiyin)).json();
+  const ride = (await orderAuto(s, pax, spot, q.options[0].priceTiyin)).json();
   // The cheap driver says no; only a more expensive one is left.
   await s.app.inject({ method: 'POST', url: `/rides/${ride.id}/decline`, headers: cheap });
   assert.equal((await requestsOf(s, standard)).length, 0, 'not sent above the ceiling');
@@ -385,7 +378,7 @@ test('one tap: a higher price needs the passenger\'s explicit confirmation', { s
   const view = (await s.app.inject({ method: 'GET', url: `/rides/${ride.id}`, headers: pax })).json();
   assert.equal(view.dispatch.state, 'needs_confirmation');
   const proposed = view.dispatch.priceTiyin;
-  assert.ok(proposed > q.best.priceTiyin);
+  assert.ok(proposed > q.options[0].priceTiyin);
 
   // Only the exact price on the screen can be confirmed.
   const wrong = await s.app.inject({ method: 'POST', url: `/rides/${ride.id}/confirm-price`, headers: pax, payload: { priceTiyin: proposed - 50_000 } });
@@ -408,7 +401,7 @@ test('one tap: ceiling checks, mode separation, no drivers', { skip }, async () 
   const spot = randomSpot();
   const pax = await passenger(s);
   const q = await quote(s, pax, spot);
-  assert.equal(q.best, null, 'nobody around');
+  assert.deepEqual(q.options, [], 'nobody around');
 
   // The ceiling must be a price that can exist for this route.
   assert.equal((await orderAuto(s, pax, spot, q.maxFareTiyin + 50_000)).statusCode, 400);
@@ -446,7 +439,7 @@ test('one tap: a driver never holds two requests at once', { skip }, async () =>
   const paxA = await passenger(s);
   const paxB = await passenger(s);
   const q = await quote(s, paxA, spot);
-  const [a, b] = await Promise.all([orderAuto(s, paxA, spot, q.best.priceTiyin), orderAuto(s, paxB, spot, q.best.priceTiyin)]);
+  const [a, b] = await Promise.all([orderAuto(s, paxA, spot, q.options[0].priceTiyin), orderAuto(s, paxB, spot, q.options[0].priceTiyin)]);
   assert.equal(a.statusCode, 201);
   assert.equal(b.statusCode, 201);
   assert.equal((await requestsOf(s, driver)).length, 1);

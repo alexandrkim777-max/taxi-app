@@ -101,7 +101,7 @@ export async function openOffers(q: Q, rideId: string) {
 export async function rideView(q: Q, rideId: string, role: Role) {
   const { rows } = await q.query(
     `SELECT r.id, r.status, vc.code AS "classCode", r.locked_price_tiyin::int AS "priceTiyin",
-            r.dispatch_mode AS mode, r.max_price_tiyin::int AS "maxPriceTiyin",
+            r.dispatch_mode AS mode, r.priority, r.max_price_tiyin::int AS "maxPriceTiyin",
             r.price_proposal_tiyin::int AS "priceProposalTiyin", r.search_deadline AS "searchDeadline",
             r.route_distance_m AS "distanceM", r.route_duration_s AS "durationS",
             r.options, r.driver_comment AS comment, r.cancelled_by AS "cancelledBy",
@@ -135,7 +135,7 @@ export async function rideView(q: Q, rideId: string, role: Role) {
     [rideId],
   );
   const view: Record<string, unknown> = {
-    id: r.id, status: r.status, mode: r.mode, classCode: r.classCode, priceTiyin: r.priceTiyin,
+    id: r.id, status: r.status, mode: r.mode, priority: r.priority, classCode: r.classCode, priceTiyin: r.priceTiyin,
     route: { distanceM: r.distanceM, durationS: r.durationS },
     stops: stops.rows, options: r.options, comment: r.comment,
     cancelledBy: r.cancelledBy, cancelReason: r.cancelReason,

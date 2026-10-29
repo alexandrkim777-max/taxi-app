@@ -38,6 +38,8 @@ interface CreateBody {
   classCode: string;
   stops: StopInput[];
   mode?: 'auto' | 'choose';
+  /** Auto mode: "cheaper" or "faster" — which rule picks the driver (default: faster). */
+  priority?: 'cheap' | 'fast';
   /** Auto mode: the price the passenger saw and agreed to; nobody more expensive is sent. */
   maxPriceTiyin?: number;
   paymentMethod?: 'cash' | 'card';
@@ -85,6 +87,7 @@ export async function rideRoutes(app: FastifyInstance, { db, routes, cityCode, p
             classCode: { type: 'string', pattern: '^[a-z_]{2,32}$' },
             stops: { type: 'array', minItems: 2, maxItems: 5, items: stop },
             mode: { type: 'string', enum: ['auto', 'choose'] },
+            priority: { type: 'string', enum: ['cheap', 'fast'] },
             maxPriceTiyin: { type: 'integer', minimum: 0 },
             paymentMethod: { type: 'string', enum: ['cash', 'card'] },
             cardId: UUID,
@@ -100,6 +103,10 @@ export async function rideRoutes(app: FastifyInstance, { db, routes, cityCode, p
       if (mode === 'auto' && request.body.maxPriceTiyin === undefined) {
         return reply.code(400).send({ error: 'max_price_required' });
       }
+      if (mode === 'choose' && request.body.priority !== undefined) {
+        return reply.code(400).send({ error: 'priority_is_for_auto' });
+      }
+      const priority = mode === 'auto' ? request.body.priority ?? 'fast' : null;
       if (await isBlocked(db, userId)) return reply.code(403).send({ error: 'blocked' });
 
       const recent = await db.query<{ n: number }>(
@@ -165,18 +172,18 @@ export async function rideRoutes(app: FastifyInstance, { db, routes, cityCode, p
           const { rows } = await tx.query<{ id: string }>(
             `INSERT INTO rides (city_id, passenger_id, class_id, route_distance_m, route_duration_s, options,
                                 driver_comment, dispatch_mode, max_price_tiyin, search_deadline, payment_method, card_id,
-                                price_coefficient)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, now() + make_interval(secs => $10), $11, $12, $13) RETURNING id`,
+                                price_coefficient, priority)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, now() + make_interval(secs => $10), $11, $12, $13, $14) RETURNING id`,
             [
               c.city_id, userId, c.id, route.distanceM, route.durationS,
               JSON.stringify(request.body.options ?? {}), request.body.comment ?? null,
               mode, mode === 'auto' ? request.body.maxPriceTiyin : null, SEARCH_WINDOW_SEC,
-              paymentMethod, cardId, c.coefficient,
+              paymentMethod, cardId, c.coefficient, priority,
             ],
           );
           const id = rows[0]!.id;
           await insertStops(tx, id, request.body.stops);
-          await logEvent(tx, id, 'status:created', 'passenger', userId, { mode });
+          await logEvent(tx, id, 'status:created', 'passenger', userId, { mode, priority });
           await refreshOffers(tx, id);
           if (mode === 'auto') await assignNext(tx, id);
           return id;

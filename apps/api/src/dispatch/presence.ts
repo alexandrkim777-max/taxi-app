@@ -109,6 +109,9 @@ export async function setPresenceStatus(q: Q, driverId: string, status: 'online'
 export interface NearbyDriver {
   driverId: string;
   distanceM: number;
+  /** Current position (for the road-time estimate to the pickup). */
+  lat: number;
+  lng: number;
   /** Average rating, or null while the driver has fewer than 5 ratings. */
   rating: number | null;
   tariffId: string;
@@ -131,6 +134,7 @@ export async function nearbyDrivers(
     `WITH pickup AS (SELECT ST_SetSRID(ST_MakePoint($2, $1), 4326)::geography AS point)
      SELECT p.driver_id AS "driverId",
             ST_Distance(p.point, pickup.point)::int AS "distanceM",
+            ST_Y(p.point::geometry) AS lat, ST_X(p.point::geometry) AS lng,
             CASE WHEN d.rating_count >= 5 THEN d.rating::float END AS rating,
             t.id AS "tariffId",
             t.base_tiyin::int AS "baseTiyin", t.per_km_tiyin::int AS "perKmTiyin",

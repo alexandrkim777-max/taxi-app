@@ -95,7 +95,7 @@ test('with equal price and pickup, the better-rated driver gets the one-tap orde
     .json().classes.find((c: { code: string }) => c.code === 'economy');
   const ride = await s.app.inject({
     method: 'POST', url: '/rides', headers: pax,
-    payload: { classCode: 'economy', stops: [spot, north(spot, 6000)], maxPriceTiyin: q.best.priceTiyin },
+    payload: { classCode: 'economy', stops: [spot, north(spot, 6000)], maxPriceTiyin: q.options[0].priceTiyin },
   });
   assert.equal(ride.statusCode, 201, ride.body);
   const reqs = async (h: Headers) => (await s.app.inject({ method: 'GET', url: '/drivers/me/requests', headers: h })).json();
