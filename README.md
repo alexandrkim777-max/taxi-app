@@ -55,16 +55,17 @@ Tests: `npm test` (the API integration tests need a migrated database at `DATABA
 | GET | `/classes` | anyone | Vehicle classes with recommended tariff and price corridor |
 | GET | `/drivers/me/tariff` | verified driver | Current tariff (or recommended), allowed bounds per component |
 | PUT | `/drivers/me/tariff` | verified driver | New tariff version inside the corridor, at most once per 24 h |
-| POST | `/quotes` | user | Server-side route for 2–5 stops and the price range per class |
+| POST | `/quotes` | user | Route for 2–5 stops; per class the price range and the one-tap price (best nearby driver, pickup minutes) |
 | POST | `/drivers/me/online` | verified driver | Goes on the line (needs an active subscription) |
 | POST | `/drivers/me/location` | driver on the line | Position ping every 3–5 s |
 | POST | `/drivers/me/offline` | driver | Leaves the line (not during a ride) |
-| GET | `/drivers/me/requests` | driver | Rides where a passenger chose this driver; 30 s to accept |
-| POST | `/rides` | user | Creates a ride and returns nearby drivers, each at their own price |
-| POST | `/rides/:id/search` | passenger | Refreshes the offers |
-| POST | `/rides/:id/choose` | passenger | Chooses an offer |
+| GET | `/drivers/me/requests` | driver | Pending requests: 15 s to accept (one tap), 30 s (passenger's own pick) |
+| POST | `/rides` | user | `mode: auto` (default, one tap with `maxPriceTiyin` from the quote) or `mode: choose` (list of drivers) |
+| POST | `/rides/:id/search` | passenger | List mode: refreshes the offers |
+| POST | `/rides/:id/choose` | passenger | List mode: chooses an offer |
+| POST | `/rides/:id/confirm-price` | passenger | One tap: accepts a higher price proposed when only pricier drivers are left |
 | POST | `/rides/:id/accept` | chosen driver | Accepts; the offer price is locked into the ride |
-| POST | `/rides/:id/decline` | chosen driver | Declines; not offered this ride again |
+| POST | `/rides/:id/decline` | chosen driver | Declines; one-tap rides go straight to the next driver |
 | POST | `/rides/:id/status` | assigned driver | `driver_en_route` → `arrived` → `in_progress` → `completed` |
 | POST | `/rides/:id/cancel` | passenger or driver | Before the trip starts |
 | GET | `/rides/:id` | participants | Ride, stops, offers or assigned driver with live position |
@@ -74,12 +75,25 @@ Security measures: see [SECURITY.md](SECURITY.md).
 
 ## How a ride is matched
 
-1. The driver goes on the line and sends their position every few seconds.
-2. The passenger creates a ride; the server routes it and finds up to 10 free drivers of the class
-   within their pickup radius (max 5 km), each priced by **their own tariff**, clamped into the corridor.
-3. The passenger sees model, colour, rating, distance and price — not the plate or exact position — and chooses.
-4. The chosen driver has 30 s to accept. On acceptance the price is copied into the ride and locked.
-5. The passenger then sees the plate and the driver's live position until the ride ends.
+Every nearby free driver of the class (up to 10, within their pickup radius, max 5 km) is priced
+by **their own tariff**, clamped into the corridor. Then one of two modes:
+
+**One tap (default, like Yandex).** The order button shows one price and pickup time: the best
+nearby driver, weighing price and pickup time (1 minute of pickup = 1 000 sum). That price is the
+passenger's ceiling.
+1. The ride goes to the best driver at or below the ceiling; they have 15 s to accept.
+2. On decline or silence it goes to the next one. A driver gets one request at a time and is
+   never sent the same ride twice.
+3. If only more expensive drivers are left, the passenger sees the new price and must confirm it.
+   Nothing is ever charged above what the passenger agreed to.
+4. No driver within 5 minutes: the system cancels with `no_drivers`.
+
+**Choose a driver (list).** The passenger sees model, colour, rating, distance and price — not the
+plate or exact position — and picks one; the driver has 30 s to accept.
+
+On acceptance the price is copied into the ride and locked; the passenger then sees the plate and
+the driver's live position until the ride ends. A dispatcher loop (every 2 s, safe on several
+instances) handles timeouts and newly arrived drivers.
 
 Live positions sit in an `UNLOGGED` PostgreSQL table behind `apps/api/src/dispatch/presence.ts`,
 so they can move to Redis when load requires it without touching the ride logic.

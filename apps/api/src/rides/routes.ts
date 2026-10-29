@@ -1,18 +1,24 @@
-// Passenger and driver ride flow:
-//   passenger creates a ride -> sees nearby drivers with their own prices -> chooses one
-//   -> the driver accepts (price locked) -> en route -> arrived -> in progress -> completed.
+// Passenger and driver ride flow.
+//
+// Two ways to order:
+//   auto   (default) — one tap. The passenger agrees to a price ceiling (the best price shown
+//          in the quote); the system sends the ride to the best driver at or below it and moves
+//          to the next driver on decline or timeout. Never more expensive without confirmation.
+//   choose — the passenger sees nearby drivers with their own prices and picks one.
+// Then: driver accepts (price locked) -> en route -> arrived -> in progress -> completed.
 // Every status change goes through the shared status machine and is written to ride_events.
 
 import type { FastifyInstance } from 'fastify';
 import type pg from 'pg';
-import { canTransition, clampToCorridor, fareTiyin, type RideStatus, type Tariff } from '@taxi/shared';
+import { canTransition, clampToCorridor, fareTiyin, type RideStatus } from '@taxi/shared';
 import { requireUser } from '../auth/session.ts';
 import type { RouteProvider } from '../routing/index.ts';
 import { UZ_LAT, UZ_LNG, uuidParams } from '../lib/geo.ts';
 import { HttpError, isUniqueViolation, withTx } from '../lib/tx.ts';
+import { driverContext, PRESENCE_TTL_SEC, setPresenceStatus } from '../dispatch/presence.ts';
 import {
-  driverContext, nearbyDrivers, PRESENCE_TTL_SEC, setPresenceStatus,
-} from '../dispatch/presence.ts';
+  ACCEPT_WINDOW_SEC, assignNext, expireLapsed, logEvent, pickupMin, refreshOffers, reserveDriver, SEARCH_WINDOW_SEC,
+} from '../dispatch/matching.ts';
 
 type Q = pg.Pool | pg.PoolClient;
 
@@ -22,14 +28,10 @@ interface Deps {
   cityCode: string;
 }
 
-/** How long an offer stays visible to the passenger. */
-const OFFER_TTL_SEC = 90;
-/** How long a chosen driver has to accept. */
-const ACCEPT_WINDOW_SEC = 30;
-const MAX_OFFERS = 10;
 /** Anti-spam: rides a passenger can create per hour (each one pings drivers). */
 const MAX_RIDES_PER_HOUR = 20;
 const ACTIVE = ['accepted', 'driver_en_route', 'arrived', 'in_progress'];
+const UUID = { type: 'string', pattern: '^[0-9a-fA-F-]{36}$' } as const;
 
 const stop = {
   type: 'object',
@@ -56,6 +58,9 @@ const rideOptions = {
 interface CreateBody {
   classCode: string;
   stops: { lat: number; lng: number; address?: string }[];
+  mode?: 'auto' | 'choose';
+  /** Auto mode: the price the passenger saw and agreed to; nobody more expensive is sent. */
+  maxPriceTiyin?: number;
   options?: Record<string, boolean>;
   comment?: string;
 }
@@ -66,16 +71,11 @@ interface RideRow {
   passenger_id: string;
   driver_id: string | null;
   class_id: string;
+  dispatch_mode: 'auto' | 'choose';
+  price_proposal_tiyin: string | null;
 }
 
 type Role = 'passenger' | 'driver';
-
-async function event(q: Q, rideId: string, type: string, actor: Role | 'system', actorId: string | null, payload = {}) {
-  await q.query(
-    `INSERT INTO ride_events (ride_id, type, actor, actor_id, payload) VALUES ($1, $2, $3, $4, $5)`,
-    [rideId, type, actor, actorId, JSON.stringify(payload)],
-  );
-}
 
 async function isBlocked(q: Q, userId: string): Promise<boolean> {
   const { rows } = await q.query(
@@ -92,7 +92,8 @@ async function isBlocked(q: Q, userId: string): Promise<boolean> {
  */
 async function rideFor(q: Q, rideId: string, userId: string, lock: boolean): Promise<{ ride: RideRow; role: Role }> {
   const { rows } = await q.query<RideRow & { driver_user_id: string | null }>(
-    `SELECT r.id, r.status, r.passenger_id, r.driver_id, r.class_id, d.user_id AS driver_user_id
+    `SELECT r.id, r.status, r.passenger_id, r.driver_id, r.class_id, r.dispatch_mode, r.price_proposal_tiyin,
+            d.user_id AS driver_user_id
        FROM rides r LEFT JOIN drivers d ON d.id = r.driver_id
       WHERE r.id = $1 AND r.deleted_at IS NULL
       ${lock ? 'FOR UPDATE OF r' : ''}`,
@@ -121,19 +122,24 @@ async function openOffers(q: Q, rideId: string) {
       ORDER BY o.price_tiyin, "distanceM"`,
     [rideId],
   );
-  return rows;
+  return rows.map((o) => ({ ...o, pickupMin: pickupMin(o.distanceM) }));
 }
 
 async function rideView(q: Q, rideId: string, role: Role) {
   const { rows } = await q.query(
     `SELECT r.id, r.status, vc.code AS "classCode", r.locked_price_tiyin::int AS "priceTiyin",
+            r.dispatch_mode AS mode, r.max_price_tiyin::int AS "maxPriceTiyin",
+            r.price_proposal_tiyin::int AS "priceProposalTiyin", r.search_deadline AS "searchDeadline",
             r.route_distance_m AS "distanceM", r.route_duration_s AS "durationS",
-            r.options, r.driver_comment AS comment, r.cancelled_by AS "cancelledBy", r.created_at AS "createdAt",
+            r.options, r.driver_comment AS comment, r.cancelled_by AS "cancelledBy",
+            r.cancel_reason AS "cancelReason", r.created_at AS "createdAt",
             r.driver_id, pu.name AS "passengerName",
             du.name AS "driverName", d.rating::float AS "driverRating",
             v.make_model AS "makeModel", v.color, v.plate,
             ST_Y(p.point::geometry) AS "driverLat", ST_X(p.point::geometry) AS "driverLng",
-            p.heading AS "driverHeading", p.updated_at AS "driverSeenAt"
+            p.heading AS "driverHeading", p.updated_at AS "driverSeenAt",
+            EXISTS (SELECT 1 FROM ride_offers o
+                     WHERE o.ride_id = r.id AND o.status = 'chosen' AND o.expires_at > now()) AS "waitingDriver"
        FROM rides r
        JOIN vehicle_classes vc ON vc.id = r.class_id
        JOIN users pu ON pu.id = r.passenger_id
@@ -151,11 +157,23 @@ async function rideView(q: Q, rideId: string, role: Role) {
     [rideId],
   );
   const view: Record<string, unknown> = {
-    id: r.id, status: r.status, classCode: r.classCode, priceTiyin: r.priceTiyin,
+    id: r.id, status: r.status, mode: r.mode, classCode: r.classCode, priceTiyin: r.priceTiyin,
     route: { distanceM: r.distanceM, durationS: r.durationS },
     stops: stops.rows, options: r.options, comment: r.comment,
-    cancelledBy: r.cancelledBy, createdAt: r.createdAt,
+    cancelledBy: r.cancelledBy, cancelReason: r.cancelReason, createdAt: r.createdAt,
   };
+  if (r.status === 'created' && role === 'passenger') {
+    if (r.mode === 'auto') {
+      view.maxPriceTiyin = r.maxPriceTiyin;
+      view.searchDeadline = r.searchDeadline;
+      // What the passenger's screen shows while we look for a driver.
+      view.dispatch = r.priceProposalTiyin
+        ? { state: 'needs_confirmation', priceTiyin: r.priceProposalTiyin }
+        : { state: r.waitingDriver ? 'waiting_driver' : 'searching' };
+    } else {
+      view.offers = await openOffers(q, rideId);
+    }
+  }
   if (r.driver_id) {
     view.driver = {
       name: r.driverName, rating: r.driverRating,
@@ -167,58 +185,10 @@ async function rideView(q: Q, rideId: string, role: Role) {
     };
   }
   if (role === 'driver') view.passenger = { name: r.passengerName };
-  if (role === 'passenger' && r.status === 'created') view.offers = await openOffers(q, rideId);
   return view;
 }
 
 export async function rideRoutes(app: FastifyInstance, { db, routes, cityCode }: Deps): Promise<void> {
-  /**
-   * Finds nearby drivers and (re)creates their offers at their own price, clamped into
-   * the class corridor. Offers of drivers who left are expired; a driver who declined
-   * this ride is never offered again.
-   */
-  async function search(rideId: string, passengerId: string): Promise<void> {
-    const { rows } = await db.query(
-      `SELECT r.route_distance_m, r.route_duration_s, r.class_id,
-              ST_Y(s.point::geometry) AS lat, ST_X(s.point::geometry) AS lng,
-              vc.rec_base_tiyin, vc.rec_per_km_tiyin, vc.rec_per_min_tiyin, vc.rec_min_fare_tiyin,
-              vc.corridor_min_pct, vc.corridor_max_pct
-         FROM rides r
-         JOIN ride_stops s ON s.ride_id = r.id AND s.position = 0
-         JOIN vehicle_classes vc ON vc.id = r.class_id
-        WHERE r.id = $1`,
-      [rideId],
-    );
-    const r = rows[0];
-    const route = { distanceM: r.route_distance_m, durationS: r.route_duration_s };
-    const rec: Tariff = {
-      baseTiyin: Number(r.rec_base_tiyin), perKmTiyin: Number(r.rec_per_km_tiyin),
-      perMinTiyin: Number(r.rec_per_min_tiyin), minFareTiyin: Number(r.rec_min_fare_tiyin),
-    };
-    const reference = fareTiyin(rec, route);
-    const corridor = { minPct: r.corridor_min_pct, maxPct: r.corridor_max_pct };
-
-    const drivers = await nearbyDrivers(db, {
-      lat: r.lat, lng: r.lng, classId: r.class_id, excludeUserId: passengerId, limit: MAX_OFFERS,
-    });
-    const prices = drivers.map((d) => clampToCorridor(fareTiyin(d, route), reference, corridor));
-
-    await withTx(db, async (tx) => {
-      await tx.query(`UPDATE ride_offers SET status = 'expired' WHERE ride_id = $1 AND status = 'open'`, [rideId]);
-      if (drivers.length === 0) return;
-      await tx.query(
-        `INSERT INTO ride_offers (ride_id, driver_id, price_tiyin, tariff_id, expires_at)
-         SELECT $1, d, p, t, now() + make_interval(secs => $5)
-           FROM unnest($2::uuid[], $3::bigint[], $4::uuid[]) AS x(d, p, t)
-         ON CONFLICT (ride_id, driver_id) DO UPDATE
-           SET status = 'open', price_tiyin = EXCLUDED.price_tiyin, tariff_id = EXCLUDED.tariff_id,
-               expires_at = EXCLUDED.expires_at, created_at = now()
-           WHERE ride_offers.status IN ('open', 'expired')`,
-        [rideId, drivers.map((d) => d.driverId), prices, drivers.map((d) => d.tariffId), OFFER_TTL_SEC],
-      );
-    });
-  }
-
   app.post<{ Body: CreateBody }>(
     '/rides',
     {
@@ -232,6 +202,8 @@ export async function rideRoutes(app: FastifyInstance, { db, routes, cityCode }:
           properties: {
             classCode: { type: 'string', pattern: '^[a-z_]{2,32}$' },
             stops: { type: 'array', minItems: 2, maxItems: 5, items: stop },
+            mode: { type: 'string', enum: ['auto', 'choose'] },
+            maxPriceTiyin: { type: 'integer', minimum: 0 },
             options: rideOptions,
             comment: { type: 'string', maxLength: 300 },
           },
@@ -240,6 +212,10 @@ export async function rideRoutes(app: FastifyInstance, { db, routes, cityCode }:
     },
     async (request, reply) => {
       const userId = request.user!.id;
+      const mode = request.body.mode ?? 'auto';
+      if (mode === 'auto' && request.body.maxPriceTiyin === undefined) {
+        return reply.code(400).send({ error: 'max_price_required' });
+      }
       if (await isBlocked(db, userId)) return reply.code(403).send({ error: 'blocked' });
 
       const recent = await db.query<{ n: number }>(
@@ -248,12 +224,13 @@ export async function rideRoutes(app: FastifyInstance, { db, routes, cityCode }:
       );
       if (recent.rows[0]!.n >= MAX_RIDES_PER_HOUR) return reply.code(429).send({ error: 'too_many_rides' });
 
-      const cls = await db.query<{ id: string; city_id: string }>(
-        `SELECT vc.id, vc.city_id FROM vehicle_classes vc JOIN cities c ON c.id = vc.city_id
+      const cls = await db.query(
+        `SELECT vc.* FROM vehicle_classes vc JOIN cities c ON c.id = vc.city_id
           WHERE c.code = $1 AND vc.code = $2 AND vc.deleted_at IS NULL`,
         [cityCode, request.body.classCode],
       );
-      if (!cls.rows[0]) return reply.code(400).send({ error: 'unknown_class' });
+      const c = cls.rows[0];
+      if (!c) return reply.code(400).send({ error: 'unknown_class' });
 
       // Distance and time always come from our routing, never from the client.
       let route;
@@ -264,15 +241,31 @@ export async function rideRoutes(app: FastifyInstance, { db, routes, cityCode }:
         return reply.code(503).send({ error: 'routing_unavailable' });
       }
 
+      // The ceiling only filters drivers; it never sets anyone's price. It must still be a price
+      // that can exist for this route, otherwise the ride could never be served.
+      if (mode === 'auto') {
+        const reference = fareTiyin({
+          baseTiyin: Number(c.rec_base_tiyin), perKmTiyin: Number(c.rec_per_km_tiyin),
+          perMinTiyin: Number(c.rec_per_min_tiyin), minFareTiyin: Number(c.rec_min_fare_tiyin),
+        }, route);
+        const floor = clampToCorridor(0, reference, { minPct: c.corridor_min_pct, maxPct: c.corridor_max_pct });
+        const max = request.body.maxPriceTiyin!;
+        if (max < floor || max > reference) {
+          return reply.code(400).send({ error: 'price_out_of_range', minTiyin: floor, maxTiyin: reference });
+        }
+      }
+
       let rideId: string;
       try {
         rideId = await withTx(db, async (tx) => {
           const { rows } = await tx.query<{ id: string }>(
-            `INSERT INTO rides (city_id, passenger_id, class_id, route_distance_m, route_duration_s, options, driver_comment)
-             VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id`,
+            `INSERT INTO rides (city_id, passenger_id, class_id, route_distance_m, route_duration_s, options,
+                                driver_comment, dispatch_mode, max_price_tiyin, search_deadline)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, now() + make_interval(secs => $10)) RETURNING id`,
             [
-              cls.rows[0]!.city_id, userId, cls.rows[0]!.id, route.distanceM, route.durationS,
+              c.city_id, userId, c.id, route.distanceM, route.durationS,
               JSON.stringify(request.body.options ?? {}), request.body.comment ?? null,
+              mode, mode === 'auto' ? request.body.maxPriceTiyin : null, SEARCH_WINDOW_SEC,
             ],
           );
           const id = rows[0]!.id;
@@ -283,7 +276,9 @@ export async function rideRoutes(app: FastifyInstance, { db, routes, cityCode }:
               [id, i, s.lat, s.lng, s.address ?? null],
             );
           }
-          await event(tx, id, 'status:created', 'passenger', userId);
+          await logEvent(tx, id, 'status:created', 'passenger', userId, { mode });
+          await refreshOffers(tx, id);
+          if (mode === 'auto') await assignNext(tx, id);
           return id;
         });
       } catch (err) {
@@ -292,8 +287,6 @@ export async function rideRoutes(app: FastifyInstance, { db, routes, cityCode }:
         }
         throw err;
       }
-
-      await search(rideId, userId);
       return reply.code(201).send(await rideView(db, rideId, 'passenger'));
     },
   );
@@ -321,6 +314,7 @@ export async function rideRoutes(app: FastifyInstance, { db, routes, cityCode }:
     },
   );
 
+  // Choose mode: refresh the list of drivers.
   app.post<{ Params: { id: string } }>(
     '/rides/:id/search',
     {
@@ -329,24 +323,25 @@ export async function rideRoutes(app: FastifyInstance, { db, routes, cityCode }:
       config: { rateLimit: { max: 20, timeWindow: '1 minute' } },
     },
     async (request) => {
-      const { ride, role } = await rideFor(db, request.params.id, request.user!.id, false);
-      if (role !== 'passenger') throw new HttpError(404, 'not_found');
-      if (ride.status !== 'created') throw new HttpError(409, 'ride_not_open');
-      await search(ride.id, ride.passenger_id);
-      return openOffers(db, ride.id);
+      await withTx(db, async (tx) => {
+        const { ride, role } = await rideFor(tx, request.params.id, request.user!.id, true);
+        if (role !== 'passenger') throw new HttpError(404, 'not_found');
+        if (ride.status !== 'created') throw new HttpError(409, 'ride_not_open');
+        if (ride.dispatch_mode !== 'choose') throw new HttpError(409, 'wrong_mode');
+        await refreshOffers(tx, ride.id);
+      });
+      return openOffers(db, request.params.id);
     },
   );
 
+  // Choose mode: the passenger picks a driver from the list.
   app.post<{ Params: { id: string }; Body: { offerId: string } }>(
     '/rides/:id/choose',
     {
       preHandler: requireUser,
       schema: {
         params: uuidParams,
-        body: {
-          type: 'object', required: ['offerId'], additionalProperties: false,
-          properties: { offerId: { type: 'string', pattern: '^[0-9a-fA-F-]{36}$' } },
-        },
+        body: { type: 'object', required: ['offerId'], additionalProperties: false, properties: { offerId: UUID } },
       },
     },
     async (request) => {
@@ -356,30 +351,68 @@ export async function rideRoutes(app: FastifyInstance, { db, routes, cityCode }:
           const { ride, role } = await rideFor(tx, request.params.id, userId, true);
           if (role !== 'passenger') throw new HttpError(404, 'not_found');
           if (ride.status !== 'created') throw new HttpError(409, 'ride_not_open');
+          if (ride.dispatch_mode !== 'choose') throw new HttpError(409, 'wrong_mode');
           // A choice the driver let lapse no longer blocks choosing someone else.
-          await tx.query(
-            `UPDATE ride_offers SET status = 'expired' WHERE ride_id = $1 AND status = 'chosen' AND expires_at <= now()`,
-            [ride.id],
-          );
-          const { rows } = await tx.query(
-            `UPDATE ride_offers o
-                SET status = 'chosen', expires_at = now() + make_interval(secs => $3)
-               FROM driver_presence p
+          await expireLapsed(tx, ride.id);
+          const { rows } = await tx.query<{ id: string; driver_id: string; price_tiyin: string }>(
+            `SELECT o.id, o.driver_id, o.price_tiyin
+               FROM ride_offers o JOIN driver_presence p ON p.driver_id = o.driver_id
               WHERE o.id = $2 AND o.ride_id = $1 AND o.status = 'open' AND o.expires_at > now()
-                AND p.driver_id = o.driver_id AND p.status = 'online'
-                AND p.updated_at > now() - make_interval(secs => $4)
-              RETURNING o.id, o.driver_id, o.price_tiyin`,
-            [ride.id, request.body.offerId, ACCEPT_WINDOW_SEC, PRESENCE_TTL_SEC],
+                AND p.status = 'online' AND p.updated_at > now() - make_interval(secs => $3)
+              FOR UPDATE OF o`,
+            [ride.id, request.body.offerId, PRESENCE_TTL_SEC],
           );
-          if (!rows[0]) throw new HttpError(409, 'offer_unavailable');
-          await event(tx, ride.id, 'offer_chosen', 'passenger', userId, {
-            offerId: rows[0].id, driverId: rows[0].driver_id, priceTiyin: Number(rows[0].price_tiyin),
+          const offer = rows[0];
+          // The driver may meanwhile be answering someone else's request.
+          if (!offer || !(await reserveDriver(tx, offer.driver_id))) throw new HttpError(409, 'offer_unavailable');
+          await tx.query(
+            `UPDATE ride_offers SET status = 'chosen', expires_at = now() + make_interval(secs => $2) WHERE id = $1`,
+            [offer.id, ACCEPT_WINDOW_SEC.choose],
+          );
+          await logEvent(tx, ride.id, 'offer_chosen', 'passenger', userId, {
+            offerId: offer.id, driverId: offer.driver_id, priceTiyin: Number(offer.price_tiyin),
           });
         });
       } catch (err) {
         if (isUniqueViolation(err, 'ride_offers_one_chosen')) throw new HttpError(409, 'already_chosen');
         throw err;
       }
+      return rideView(db, request.params.id, 'passenger');
+    },
+  );
+
+  // Auto mode: only more expensive drivers are left; the passenger explicitly accepts the new price.
+  app.post<{ Params: { id: string }; Body: { priceTiyin: number } }>(
+    '/rides/:id/confirm-price',
+    {
+      preHandler: requireUser,
+      schema: {
+        params: uuidParams,
+        body: {
+          type: 'object', required: ['priceTiyin'], additionalProperties: false,
+          properties: { priceTiyin: { type: 'integer', minimum: 0 } },
+        },
+      },
+    },
+    async (request) => {
+      const userId = request.user!.id;
+      await withTx(db, async (tx) => {
+        const { ride, role } = await rideFor(tx, request.params.id, userId, true);
+        if (role !== 'passenger') throw new HttpError(404, 'not_found');
+        if (ride.status !== 'created' || ride.dispatch_mode !== 'auto') throw new HttpError(409, 'ride_not_open');
+        // The passenger confirms exactly the price on their screen; a stale or invented number is refused.
+        if (ride.price_proposal_tiyin === null || Number(ride.price_proposal_tiyin) !== request.body.priceTiyin) {
+          throw new HttpError(409, 'price_changed');
+        }
+        await tx.query(
+          `UPDATE rides SET max_price_tiyin = price_proposal_tiyin, price_proposal_tiyin = NULL,
+                  search_deadline = now() + make_interval(secs => $2)
+            WHERE id = $1`,
+          [ride.id, SEARCH_WINDOW_SEC],
+        );
+        await logEvent(tx, ride.id, 'price_confirmed', 'passenger', userId, { priceTiyin: request.body.priceTiyin });
+        await assignNext(tx, ride.id);
+      });
       return rideView(db, request.params.id, 'passenger');
     },
   );
@@ -397,8 +430,7 @@ export async function rideRoutes(app: FastifyInstance, { db, routes, cityCode }:
           if (!ctx.subscribed) throw new HttpError(402, 'subscription_required');
 
           const { rows: rides } = await tx.query<RideRow>(
-            `SELECT id, status, passenger_id, driver_id, class_id FROM rides
-              WHERE id = $1 AND deleted_at IS NULL FOR UPDATE`,
+            `SELECT id, status FROM rides WHERE id = $1 AND deleted_at IS NULL FOR UPDATE`,
             [request.params.id],
           );
           const { rows: offers } = await tx.query<{ id: string; price_tiyin: string; tariff_id: string }>(
@@ -409,14 +441,14 @@ export async function rideRoutes(app: FastifyInstance, { db, routes, cityCode }:
           );
           const ride = rides[0];
           const offer = offers[0];
-          // Without a live choice for this driver the ride does not exist for them.
+          // Without a live request for this driver the ride does not exist for them.
           if (!ride || !offer) throw new HttpError(404, 'not_found');
           if (!canTransition(ride.status, 'accepted')) throw new HttpError(409, 'ride_not_open');
 
-          // The price is copied from the offer the passenger saw and is locked from now on.
+          // The price is copied from the offer and is locked from now on.
           await tx.query(
             `UPDATE rides SET status = 'accepted', driver_id = $2, vehicle_id = $3,
-                    locked_price_tiyin = $4, tariff_id = $5
+                    locked_price_tiyin = $4, tariff_id = $5, price_proposal_tiyin = NULL
               WHERE id = $1`,
             [ride.id, ctx.driverId, ctx.vehicleId, offer.price_tiyin, offer.tariff_id],
           );
@@ -426,7 +458,7 @@ export async function rideRoutes(app: FastifyInstance, { db, routes, cityCode }:
             [ride.id, ctx.driverId, offer.id],
           );
           await setPresenceStatus(tx, ctx.driverId, 'busy');
-          await event(tx, ride.id, 'status:accepted', 'driver', userId, { priceTiyin: Number(offer.price_tiyin) });
+          await logEvent(tx, ride.id, 'status:accepted', 'driver', userId, { priceTiyin: Number(offer.price_tiyin) });
         });
       } catch (err) {
         if (isUniqueViolation(err, 'rides_one_active_per_driver')) throw new HttpError(409, 'driver_busy');
@@ -441,15 +473,23 @@ export async function rideRoutes(app: FastifyInstance, { db, routes, cityCode }:
     { preHandler: requireUser, schema: { params: uuidParams } },
     async (request, reply) => {
       const userId = request.user!.id;
-      const { rows } = await db.query(
-        `UPDATE ride_offers o SET status = 'declined'
-           FROM drivers d
-          WHERE o.ride_id = $1 AND o.driver_id = d.id AND d.user_id = $2 AND o.status IN ('open', 'chosen')
-          RETURNING o.id`,
-        [request.params.id, userId],
-      );
-      if (!rows[0]) throw new HttpError(404, 'not_found');
-      await event(db, request.params.id, 'offer_declined', 'driver', userId, { offerId: rows[0].id });
+      await withTx(db, async (tx) => {
+        const { rows: rides } = await tx.query<{ dispatch_mode: string; status: string }>(
+          `SELECT dispatch_mode, status FROM rides WHERE id = $1 FOR UPDATE`,
+          [request.params.id],
+        );
+        const { rows } = await tx.query<{ id: string }>(
+          `UPDATE ride_offers o SET status = 'declined'
+             FROM drivers d
+            WHERE o.ride_id = $1 AND o.driver_id = d.id AND d.user_id = $2 AND o.status IN ('open', 'chosen')
+            RETURNING o.id`,
+          [request.params.id, userId],
+        );
+        if (!rows[0]) throw new HttpError(404, 'not_found');
+        await logEvent(tx, request.params.id, 'offer_declined', 'driver', userId, { offerId: rows[0].id });
+        // Auto mode: go straight to the next driver instead of waiting for the dispatcher.
+        if (rides[0]?.dispatch_mode === 'auto' && rides[0].status === 'created') await assignNext(tx, request.params.id);
+      });
       return reply.code(204).send();
     },
   );
@@ -476,7 +516,7 @@ export async function rideRoutes(app: FastifyInstance, { db, routes, cityCode }:
         if (!canTransition(ride.status, next)) throw new HttpError(409, 'invalid_transition');
         await tx.query(`UPDATE rides SET status = $2 WHERE id = $1`, [ride.id, next]);
         if (next === 'completed') await setPresenceStatus(tx, ride.driver_id!, 'online');
-        await event(tx, ride.id, `status:${next}`, 'driver', userId, { from: ride.status });
+        await logEvent(tx, ride.id, `status:${next}`, 'driver', userId, { from: ride.status });
       });
       return rideView(db, request.params.id, 'driver');
     },
@@ -512,7 +552,7 @@ export async function rideRoutes(app: FastifyInstance, { db, routes, cityCode }:
           [ride.id],
         );
         if (ride.driver_id) await setPresenceStatus(tx, ride.driver_id, 'online');
-        await event(tx, ride.id, 'status:cancelled', role, userId, { from: ride.status });
+        await logEvent(tx, ride.id, 'status:cancelled', role, userId, { from: ride.status });
       });
       return rideView(db, request.params.id, role);
     },

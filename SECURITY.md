@@ -49,6 +49,11 @@ every item below has a regression test in `apps/api/test/security.test.ts` or th
   and no active block; blocked users cannot order. A driver is never offered their own order.
 - One active ride per passenger and per driver, enforced by unique indexes, so parallel requests
   cannot create duplicates or let a driver accept two rides; covered by a race test.
+- One tap: the passenger's ceiling only filters drivers, it never sets anyone's price, and must lie inside the
+  route's corridor. A higher price is used only after the passenger confirms that exact amount.
+- A driver holds at most one pending request; the driver row is locked while reserving, so two rides
+  dispatched at the same moment cannot both reach the same driver (covered by a parallel test).
+- A driver who declined or let a request lapse is never sent that ride again.
 - Choices, acceptances and status changes run in transactions with row locks; every step is written to `ride_events`.
 - Abuse limits: 20 rides per passenger per hour, 10 ride requests and 20 searches per IP per minute,
   40 position pings per session per minute; positions outside Uzbekistan are rejected.

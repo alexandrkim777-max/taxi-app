@@ -4,6 +4,7 @@ import { clampToCorridor, fareTiyin, type Tariff } from '@taxi/shared';
 import { requireUser } from '../auth/session.ts';
 import type { RouteProvider } from '../routing/index.ts';
 import { uzPoint } from '../lib/geo.ts';
+import { bestOf, pickupMin, pricedDrivers } from '../dispatch/matching.ts';
 
 const TARIFF_CHANGE_COOLDOWN_HOURS = 24;
 
@@ -195,14 +196,27 @@ export async function tariffRoutes(app: FastifyInstance, { db, routes, cityCode 
         return reply.code(503).send({ error: 'routing_unavailable' });
       }
       const classes = await cityClasses();
+      const pickup = request.body.stops[0]!;
       return {
         route,
-        classes: classes.map((c) => {
+        classes: await Promise.all(classes.map(async (c) => {
           const rec = fareTiyin(recommended(c), route);
+          const corridor = { minPct: c.corridor_min_pct, maxPct: c.corridor_max_pct };
           // Price range drivers of this class can charge for this route.
-          const floor = clampToCorridor(0, rec, { minPct: c.corridor_min_pct, maxPct: c.corridor_max_pct });
-          return { code: c.code, name: c.name, seats: c.seats, maxFareTiyin: rec, minFareTiyin: floor };
-        }),
+          const floor = clampToCorridor(0, rec, corridor);
+          // The one-tap price: the best nearby driver right now (price and pickup time together).
+          // The app shows it on the "Order" button and sends it back as the ceiling.
+          const drivers = await pricedDrivers(db, {
+            lat: pickup.lat, lng: pickup.lng, route, excludeUserId: request.user!.id,
+            cls: { classId: c.id, recommended: recommended(c), corridor },
+          });
+          const best = bestOf(drivers);
+          return {
+            code: c.code, name: c.name, seats: c.seats, maxFareTiyin: rec, minFareTiyin: floor,
+            best: best ? { priceTiyin: best.priceTiyin, pickupMin: pickupMin(best.distanceM) } : null,
+            driversNearby: drivers.length,
+          };
+        })),
       };
     },
   );
