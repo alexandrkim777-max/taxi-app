@@ -59,3 +59,22 @@ export async function acceptedRide(s: Setup) {
   return { spot, driver, pax, rideId: ride.id as string, offer };
 }
 
+
+/**
+ * Moves an accepted ride through statuses as its driver. Before 'arrived' the driver's position
+ * is put at the pickup, since the server only accepts 'arrived' there.
+ */
+export async function drive(s: Setup, driver: Headers, rideId: string, statuses: string[]): Promise<void> {
+  for (const status of statuses) {
+    if (status === 'arrived') {
+      const ride = (await s.app.inject({ method: 'GET', url: `/rides/${rideId}`, headers: driver })).json();
+      const pickup = ride.stops[0];
+      const ping = await s.app.inject({
+        method: 'POST', url: '/drivers/me/location', headers: driver, payload: { lat: pickup.lat, lng: pickup.lng },
+      });
+      assert.equal(ping.statusCode, 204, ping.body);
+    }
+    const res = await s.app.inject({ method: 'POST', url: `/rides/${rideId}/status`, headers: driver, payload: { status } });
+    assert.equal(res.statusCode, 200, `${status}: ${res.body}`);
+  }
+}

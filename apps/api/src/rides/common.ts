@@ -100,7 +100,8 @@ export async function rideView(q: Q, rideId: string, role: Role) {
             r.price_proposal_tiyin::int AS "priceProposalTiyin", r.search_deadline AS "searchDeadline",
             r.route_distance_m AS "distanceM", r.route_duration_s AS "durationS",
             r.options, r.driver_comment AS comment, r.cancelled_by AS "cancelledBy",
-            r.cancel_reason AS "cancelReason", r.created_at AS "createdAt",
+            r.cancel_reason AS "cancelReason", r.cancel_fee_tiyin::int AS "cancelFeeTiyin",
+            r.cancel_fee_status AS "cancelFeeStatus", r.created_at AS "createdAt",
             r.driver_id, pu.name AS "passengerName",
             du.name AS "driverName", d.rating::float AS "driverRating",
             v.make_model AS "makeModel", v.color, v.plate,
@@ -128,7 +129,9 @@ export async function rideView(q: Q, rideId: string, role: Role) {
     id: r.id, status: r.status, mode: r.mode, classCode: r.classCode, priceTiyin: r.priceTiyin,
     route: { distanceM: r.distanceM, durationS: r.durationS },
     stops: stops.rows, options: r.options, comment: r.comment,
-    cancelledBy: r.cancelledBy, cancelReason: r.cancelReason, createdAt: r.createdAt,
+    cancelledBy: r.cancelledBy, cancelReason: r.cancelReason,
+    cancelFee: r.cancelFeeTiyin ? { amountTiyin: r.cancelFeeTiyin, status: r.cancelFeeStatus } : null,
+    createdAt: r.createdAt,
   };
   if (r.status === 'created' && role === 'passenger') {
     if (r.mode === 'auto') {

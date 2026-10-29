@@ -4,7 +4,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { db, randomPhone, setup, skip, type Setup } from './helpers.ts';
-import { acceptedRide, createRide, north, passenger, type Headers } from './rideHelpers.ts';
+import { acceptedRide, createRide, drive, north, passenger, type Headers } from './rideHelpers.ts';
 
 type Point = { lat: number; lng: number };
 
@@ -18,13 +18,6 @@ async function preview(s: Setup, auth: Headers, rideId: string, stops: Point[]) 
 
 async function confirm(s: Setup, auth: Headers, rideId: string, stops: Point[], priceTiyin: number) {
   return s.app.inject({ method: 'POST', url: `/rides/${rideId}/route`, headers: auth, payload: { stops, priceTiyin } });
-}
-
-async function drive(s: Setup, driver: Headers, rideId: string, statuses: string[]) {
-  for (const status of statuses) {
-    const res = await s.app.inject({ method: 'POST', url: `/rides/${rideId}/status`, headers: driver, payload: { status } });
-    assert.equal(res.statusCode, 200, `${status}: ${res.body}`);
-  }
 }
 
 async function admin(s: Setup): Promise<Headers> {
@@ -248,5 +241,108 @@ test('dispute timing: silent side, late opening, rides without a driver', { skip
     payload: { category: 'other', text: 'Nobody came to pick me up at all.' },
   });
   assert.equal(noDriver.statusCode, 409);
+  await s.app.close();
+});
+
+// ---------------------------------------------------------------------------
+// Paid cancellation after the driver is at the pickup
+
+test('cancel: free before arrival, fee after, shown and confirmed first', { skip }, async () => {
+  const s = await setup();
+
+  // Before arrival: free.
+  const free = await acceptedRide(s);
+  await drive(s, free.driver, free.rideId, ['driver_en_route']);
+  const t0 = (await s.app.inject({ method: 'GET', url: `/rides/${free.rideId}/cancel-terms`, headers: free.pax })).json();
+  assert.deepEqual(t0, { allowed: true, feeTiyin: 0 });
+  const c0 = await s.app.inject({ method: 'POST', url: `/rides/${free.rideId}/cancel`, headers: free.pax, payload: {} });
+  assert.equal(c0.statusCode, 200);
+  assert.equal(c0.json().cancelFee, null);
+
+  // "Arrived" far from the pickup is refused, so drivers cannot farm fees.
+  const r = await acceptedRide(s);
+  await drive(s, r.driver, r.rideId, ['driver_en_route']);
+  await s.app.inject({ method: 'POST', url: '/drivers/me/location', headers: r.driver, payload: north(r.spot, 1000) });
+  const fake = await s.app.inject({ method: 'POST', url: `/rides/${r.rideId}/status`, headers: r.driver, payload: { status: 'arrived' } });
+  assert.equal(fake.statusCode, 409);
+  assert.equal(fake.json().error, 'not_at_pickup');
+  await drive(s, r.driver, r.rideId, ['arrived']);
+
+  const terms = (await s.app.inject({ method: 'GET', url: `/rides/${r.rideId}/cancel-terms`, headers: r.pax })).json();
+  assert.equal(terms.feeTiyin, 500_000, 'economy: 5 000 sum');
+
+  // Without confirming the exact fee nothing happens.
+  const unconfirmed = await s.app.inject({ method: 'POST', url: `/rides/${r.rideId}/cancel`, headers: r.pax, payload: {} });
+  assert.equal(unconfirmed.statusCode, 409);
+  assert.equal(unconfirmed.json().feeTiyin, 500_000);
+  const wrong = await s.app.inject({ method: 'POST', url: `/rides/${r.rideId}/cancel`, headers: r.pax, payload: { acceptFeeTiyin: 100 } });
+  assert.equal(wrong.statusCode, 409);
+  assert.equal((await s.app.inject({ method: 'GET', url: `/rides/${r.rideId}`, headers: r.pax })).json().status, 'arrived');
+
+  const paid = await s.app.inject({ method: 'POST', url: `/rides/${r.rideId}/cancel`, headers: r.pax, payload: { acceptFeeTiyin: 500_000 } });
+  assert.equal(paid.statusCode, 200, paid.body);
+  assert.deepEqual(paid.json().cancelFee, { amountTiyin: 500_000, status: 'pending' });
+  // The ride price itself is untouched.
+  assert.equal(paid.json().priceTiyin, r.offer.priceTiyin);
+  await s.app.close();
+});
+
+test('cancel: driver no-show only after waiting 5 minutes; plain driver cancel is free', { skip }, async () => {
+  const s = await setup();
+  const r = await acceptedRide(s);
+  await drive(s, r.driver, r.rideId, ['driver_en_route', 'arrived']);
+
+  const early = await s.app.inject({ method: 'POST', url: `/rides/${r.rideId}/cancel`, headers: r.driver, payload: { noShow: true } });
+  assert.equal(early.statusCode, 409);
+  assert.equal(early.json().error, 'too_early_for_no_show');
+  assert.ok(early.json().noShowFrom);
+
+  // A passenger cannot claim a no-show.
+  const paxNoShow = await s.app.inject({ method: 'POST', url: `/rides/${r.rideId}/cancel`, headers: r.pax, payload: { noShow: true } });
+  assert.equal(paxNoShow.statusCode, 400);
+
+  await db.query(`UPDATE ride_events SET at = now() - interval '6 minutes' WHERE ride_id = $1 AND type = 'status:arrived'`, [r.rideId]);
+  const noShow = await s.app.inject({ method: 'POST', url: `/rides/${r.rideId}/cancel`, headers: r.driver, payload: { noShow: true } });
+  assert.equal(noShow.statusCode, 200, noShow.body);
+  assert.equal(noShow.json().cancelReason, 'no_show');
+  assert.equal(noShow.json().cancelFee.amountTiyin, 500_000);
+
+  // The driver cancels at the pickup for another reason: the passenger pays nothing.
+  const r2 = await acceptedRide(s);
+  await drive(s, r2.driver, r2.rideId, ['driver_en_route', 'arrived']);
+  const plain = await s.app.inject({ method: 'POST', url: `/rides/${r2.rideId}/cancel`, headers: r2.driver, payload: { reason: 'flat tyre' } });
+  assert.equal(plain.statusCode, 200);
+  assert.equal(plain.json().cancelFee, null);
+  await s.app.close();
+});
+
+test('cancel fee: class amounts stay within 5 000–10 000 sum; a moderator can waive it', { skip }, async () => {
+  const fees = await db.query(`SELECT code, cancel_fee_tiyin::int AS fee FROM vehicle_classes ORDER BY fee`);
+  for (const f of fees.rows) assert.ok(f.fee >= 500_000 && f.fee <= 1_000_000, f.code);
+  await assert.rejects(db.query(`UPDATE vehicle_classes SET cancel_fee_tiyin = 5000000 WHERE code = 'economy'`));
+
+  const s = await setup();
+  const r = await acceptedRide(s);
+  await drive(s, r.driver, r.rideId, ['driver_en_route', 'arrived']);
+  await s.app.inject({ method: 'POST', url: `/rides/${r.rideId}/cancel`, headers: r.pax, payload: { acceptFeeTiyin: 500_000 } });
+
+  // The passenger says the driver was at the wrong entrance; the driver disagrees.
+  const opened = await s.app.inject({
+    method: 'POST', url: `/rides/${r.rideId}/dispute`, headers: r.pax,
+    payload: { category: 'cancellation', text: 'Driver waited at the wrong entrance, not where I was.' },
+  });
+  assert.equal(opened.statusCode, 201);
+  await s.app.inject({
+    method: 'POST', url: `/rides/${r.rideId}/dispute/statement`, headers: r.driver,
+    payload: { text: 'I was exactly at the pin, waited and called twice.' },
+  });
+  const mod = await admin(s);
+  const res = await s.app.inject({
+    method: 'POST', url: `/admin/disputes/${opened.json().id}/resolve`, headers: mod,
+    payload: { outcome: 'passenger', resolution: 'Pin was on the other side of the building.', waiveCancelFee: true },
+  });
+  assert.equal(res.statusCode, 200, res.body);
+  const view = (await s.app.inject({ method: 'GET', url: `/rides/${r.rideId}`, headers: r.pax })).json();
+  assert.equal(view.cancelFee.status, 'waived');
   await s.app.close();
 });

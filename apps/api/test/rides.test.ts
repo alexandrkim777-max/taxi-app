@@ -5,7 +5,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { db, randomPhone, setup, skip, verifiedDriver, type Setup } from './helpers.ts';
-import { acceptedRide, createRide, north, offerOf, onlineDriver, passenger, randomSpot, type Headers } from './rideHelpers.ts';
+import { acceptedRide, createRide, drive, north, offerOf, onlineDriver, passenger, randomSpot, type Headers } from './rideHelpers.ts';
 import { dispatchTick } from '../src/dispatch/matching.ts';
 
 test('full ride: offer, choice, acceptance with locked price, status flow', { skip }, async () => {
@@ -53,10 +53,7 @@ test('full ride: offer, choice, acceptance with locked price, status flow', { sk
   assert.equal(view.driver.vehicle.plate, '01A123BC');
   assert.equal(view.driver.location.heading, 180, 'passenger tracks the assigned driver');
 
-  for (const status of ['driver_en_route', 'arrived', 'in_progress', 'completed']) {
-    const res = await s.app.inject({ method: 'POST', url: `/rides/${ride.id}/status`, headers: driver, payload: { status } });
-    assert.equal(res.statusCode, 200, `${status}: ${res.body}`);
-  }
+  await drive(s, driver, ride.id, ['driver_en_route', 'arrived', 'in_progress', 'completed']);
   const done = (await s.app.inject({ method: 'GET', url: `/rides/${ride.id}`, headers: pax })).json();
   assert.equal(done.status, 'completed');
   assert.equal(done.priceTiyin, offer.priceTiyin);
@@ -148,9 +145,7 @@ test('one active ride per passenger and per driver', { skip }, async () => {
 test('cancellation rules', { skip }, async () => {
   const s = await setup();
   const { driver, pax, rideId } = await acceptedRide(s);
-  for (const status of ['driver_en_route', 'arrived', 'in_progress']) {
-    await s.app.inject({ method: 'POST', url: `/rides/${rideId}/status`, headers: driver, payload: { status } });
-  }
+  await drive(s, driver, rideId, ['driver_en_route', 'arrived', 'in_progress']);
   const late = await s.app.inject({ method: 'POST', url: `/rides/${rideId}/cancel`, headers: pax, payload: {} });
   assert.equal(late.statusCode, 409, 'a ride in progress cannot be cancelled');
 

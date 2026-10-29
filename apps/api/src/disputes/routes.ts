@@ -255,7 +255,7 @@ export async function disputeRoutes(app: FastifyInstance, { db }: Deps): Promise
     },
   );
 
-  app.post<{ Params: { id: string }; Body: { outcome: string; resolution: string } }>(
+  app.post<{ Params: { id: string }; Body: { outcome: string; resolution: string; waiveCancelFee?: boolean } }>(
     '/admin/disputes/:id/resolve',
     {
       preHandler: requireRole('admin'),
@@ -263,7 +263,12 @@ export async function disputeRoutes(app: FastifyInstance, { db }: Deps): Promise
         params: uuidParams,
         body: {
           type: 'object', required: ['outcome', 'resolution'], additionalProperties: false,
-          properties: { outcome: { type: 'string', enum: OUTCOMES }, resolution: statementText },
+          properties: {
+            outcome: { type: 'string', enum: OUTCOMES },
+            resolution: statementText,
+            // Lifts a cancellation fee that has not been paid yet.
+            waiveCancelFee: { type: 'boolean' },
+          },
         },
       },
     },
@@ -284,7 +289,16 @@ export async function disputeRoutes(app: FastifyInstance, { db }: Deps): Promise
             WHERE id = $1`,
           [request.params.id, request.body.outcome, clean(request.body.resolution), adminId],
         );
-        await logEvent(tx, d.ride_id, 'dispute_resolved', 'admin', adminId, { outcome: request.body.outcome });
+        let waived = false;
+        if (request.body.waiveCancelFee) {
+          const { rowCount } = await tx.query(
+            `UPDATE rides SET cancel_fee_status = 'waived' WHERE id = $1 AND cancel_fee_status = 'pending'`,
+            [d.ride_id],
+          );
+          if (!rowCount) throw new HttpError(409, 'no_pending_fee');
+          waived = true;
+        }
+        await logEvent(tx, d.ride_id, 'dispute_resolved', 'admin', adminId, { outcome: request.body.outcome, feeWaived: waived });
       });
       return { status: 'resolved' };
     },

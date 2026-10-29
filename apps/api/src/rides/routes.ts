@@ -15,6 +15,7 @@ import { canTransition, clampToCorridor, fareTiyin, type RideStatus } from '@tax
 import { requireUser } from '../auth/session.ts';
 import type { RouteProvider } from '../routing/index.ts';
 import { uuidParams } from '../lib/geo.ts';
+import { cancelTerms, ARRIVAL_RADIUS_M } from './cancellation.ts';
 import { isBlocked, openOffers, rideFor, rideOptions, rideView, stop, UUID, type RideRow, type Role } from './common.ts';
 import { HttpError, isUniqueViolation, withTx } from '../lib/tx.ts';
 import { driverContext, PRESENCE_TTL_SEC, setPresenceStatus } from '../dispatch/presence.ts';
@@ -368,6 +369,17 @@ export async function rideRoutes(app: FastifyInstance, { db, routes, cityCode }:
         // Only the assigned driver moves the ride forward.
         if (role !== 'driver') throw new HttpError(404, 'not_found');
         if (!canTransition(ride.status, next)) throw new HttpError(409, 'invalid_transition');
+        if (next === 'arrived') {
+          // 'Arrived' starts the paid-cancellation clock, so it must be true: the driver's
+          // fresh live position has to be at the pickup.
+          const { rows } = await tx.query(
+            `SELECT 1 FROM driver_presence p JOIN ride_stops s ON s.ride_id = $1 AND s.position = 0
+              WHERE p.driver_id = $2 AND p.updated_at > now() - make_interval(secs => $4)
+                AND ST_DWithin(p.point, s.point, $3)`,
+            [ride.id, ride.driver_id, ARRIVAL_RADIUS_M, PRESENCE_TTL_SEC],
+          );
+          if (!rows[0]) throw new HttpError(409, 'not_at_pickup');
+        }
         await tx.query(`UPDATE rides SET status = $2 WHERE id = $1`, [ride.id, next]);
         if (next === 'completed') await setPresenceStatus(tx, ride.driver_id!, 'online');
         await logEvent(tx, ride.id, `status:${next}`, 'driver', userId, { from: ride.status });
@@ -376,7 +388,23 @@ export async function rideRoutes(app: FastifyInstance, { db, routes, cityCode }:
     },
   );
 
-  app.post<{ Params: { id: string }; Body: { reason?: string } }>(
+  // What cancelling now would cost; the app shows this before the cancel button does anything.
+  app.get<{ Params: { id: string }; Querystring: { noShow?: boolean } }>(
+    '/rides/:id/cancel-terms',
+    {
+      preHandler: requireUser,
+      schema: {
+        params: uuidParams,
+        querystring: { type: 'object', additionalProperties: false, properties: { noShow: { type: 'boolean' } } },
+      },
+    },
+    async (request) => {
+      const { ride, role } = await rideFor(db, request.params.id, request.user!.id, false);
+      return cancelTerms(db, ride.id, ride.status, role, request.query.noShow ?? false);
+    },
+  );
+
+  app.post<{ Params: { id: string }; Body: { reason?: string; noShow?: boolean; acceptFeeTiyin?: number } }>(
     '/rides/:id/cancel',
     {
       preHandler: requireUser,
@@ -384,30 +412,60 @@ export async function rideRoutes(app: FastifyInstance, { db, routes, cityCode }:
         params: uuidParams,
         body: {
           type: 'object', additionalProperties: false,
-          properties: { reason: { type: 'string', maxLength: 300 } },
+          properties: {
+            reason: { type: 'string', maxLength: 300 },
+            // Driver only: the passenger did not come out.
+            noShow: { type: 'boolean' },
+            // Passenger only: the exact fee shown by cancel-terms, confirming they agree to pay it.
+            acceptFeeTiyin: { type: 'integer', minimum: 0 },
+          },
         },
       },
     },
-    async (request) => {
+    async (request, reply) => {
       const userId = request.user!.id;
+      const body = request.body ?? {};
       let role: Role = 'passenger';
-      await withTx(db, async (tx) => {
-        const found = await rideFor(tx, request.params.id, userId, true);
-        role = found.role;
-        const { ride } = found;
-        // A ride in progress cannot be cancelled; it ends with completion.
-        if (!canTransition(ride.status, 'cancelled')) throw new HttpError(409, 'invalid_transition');
-        await tx.query(
-          `UPDATE rides SET status = 'cancelled', cancelled_by = $2, cancel_reason = $3 WHERE id = $1`,
-          [ride.id, role, request.body?.reason ?? null],
-        );
-        await tx.query(
-          `UPDATE ride_offers SET status = 'expired' WHERE ride_id = $1 AND status IN ('open', 'chosen')`,
-          [ride.id],
-        );
-        if (ride.driver_id) await setPresenceStatus(tx, ride.driver_id, 'online');
-        await logEvent(tx, ride.id, 'status:cancelled', role, userId, { from: ride.status });
-      });
+      try {
+        await withTx(db, async (tx) => {
+          const found = await rideFor(tx, request.params.id, userId, true);
+          role = found.role;
+          const { ride } = found;
+          if (body.noShow && role !== 'driver') throw new HttpError(400, 'no_show_is_for_drivers');
+          // A ride in progress cannot be cancelled; it ends with completion.
+          if (!canTransition(ride.status, 'cancelled')) throw new HttpError(409, 'invalid_transition');
+
+          const terms = await cancelTerms(tx, ride.id, ride.status, role, body.noShow ?? false);
+          if (!terms.allowed) {
+            throw Object.assign(new HttpError(409, 'too_early_for_no_show'), { noShowFrom: terms.noShowFrom });
+          }
+          // The passenger is never charged a fee they did not see and accept.
+          if (role === 'passenger' && terms.feeTiyin > 0 && body.acceptFeeTiyin !== terms.feeTiyin) {
+            throw Object.assign(new HttpError(409, 'fee_confirmation_required'), { feeTiyin: terms.feeTiyin });
+          }
+          const fee = terms.feeTiyin > 0 ? terms.feeTiyin : null;
+          await tx.query(
+            `UPDATE rides SET status = 'cancelled', cancelled_by = $2, cancel_reason = $3,
+                    cancel_fee_tiyin = $4, cancel_fee_status = CASE WHEN $4::bigint IS NULL THEN NULL ELSE 'pending' END
+              WHERE id = $1`,
+            [ride.id, role, body.noShow ? 'no_show' : body.reason ?? null, fee],
+          );
+          await tx.query(
+            `UPDATE ride_offers SET status = 'expired' WHERE ride_id = $1 AND status IN ('open', 'chosen')`,
+            [ride.id],
+          );
+          if (ride.driver_id) await setPresenceStatus(tx, ride.driver_id, 'online');
+          await logEvent(tx, ride.id, 'status:cancelled', role, userId, {
+            from: ride.status, feeTiyin: fee ?? 0, noShow: body.noShow ?? false,
+          });
+        });
+      } catch (err) {
+        if (err instanceof HttpError && err.statusCode === 409) {
+          const { statusCode, code, message, ...extra } = err as HttpError & Record<string, unknown>;
+          return reply.code(statusCode).send({ error: code, ...extra });
+        }
+        throw err;
+      }
       return rideView(db, request.params.id, role);
     },
   );

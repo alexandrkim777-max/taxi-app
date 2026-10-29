@@ -67,7 +67,8 @@ Tests: `npm test` (the API integration tests need a migrated database at `DATABA
 | POST | `/rides/:id/accept` | chosen driver | Accepts; the offer price is locked into the ride |
 | POST | `/rides/:id/decline` | chosen driver | Declines; one-tap rides go straight to the next driver |
 | POST | `/rides/:id/status` | assigned driver | `driver_en_route` → `arrived` → `in_progress` → `completed` |
-| POST | `/rides/:id/cancel` | passenger or driver | Before the trip starts |
+| GET | `/rides/:id/cancel-terms` | participants | What cancelling now costs (free before the driver arrives) |
+| POST | `/rides/:id/cancel` | passenger or driver | Before the trip starts; after arrival the passenger confirms the fee, the driver may cancel as `noShow` after 5 min |
 | GET | `/rides/:id` | participants | Ride, stops, offers or assigned driver with live position |
 | GET | `/rides/active` | user | Current ride, to restore the app after a restart |
 | POST | `/rides/:id/route/preview` | passenger | New price for added / removed / changed stops; nothing changes yet |
@@ -112,6 +113,9 @@ so they can move to Redis when load requires it without touching the ride logic.
 - Ride price is locked at acceptance. It changes **only** when the passenger adds, removes or changes
   a stop and confirms the new price: no waiting charges, no driver surcharges (enforced by the database).
 - Disputes: both sides write what happened independently; a moderator decides with the ride log at hand.
+- Cancellation is free until the driver is at the pickup. After that a fixed class fee of 5 000–10 000 sum
+  goes to the driver (passenger cancels, or no-show after 5 min of waiting). The fee is shown and confirmed
+  first; a moderator can waive it in a dispute.
 - Driver tariffs are versioned; old versions are never deleted.
 - Nothing is hard-deleted: rows carry `deleted_at`.
 - Ride status changes only through allowed transitions; every change is written to `ride_events`.

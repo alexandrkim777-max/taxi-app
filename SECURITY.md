@@ -70,6 +70,14 @@ every item below has a regression test in `apps/api/test/security.test.ts` or th
   Moderation endpoints require `admin`. Statement text is stored as written — clients must render it
   as plain text, never as HTML.
 
+## Cancellation fee
+
+- 'Arrived' is accepted only when the driver's fresh live position is within 150 m of the pickup,
+  so a driver cannot start the paid-cancellation clock from elsewhere.
+- No-show only by the driver and only after 5 minutes at the pickup (measured from the logged arrival).
+- The passenger is charged only after confirming the exact fee returned by `cancel-terms`.
+- Fee amounts are limited to 5 000–10 000 sum by a database check; waiving needs a moderator decision.
+
 ## Errors
 
 - Internal errors return a generic `internal_error`; details go only to the server log.
