@@ -60,7 +60,7 @@ export function Map({ pins, line, bottomInset = 0, style, onPinPress }: MapProps
           </Pressable>
         );
       })}
-      <View style={{ position: 'absolute', left: 10, top: 10, opacity: 0.7 }} pointerEvents="none"><T v="caption" muted>Demo · schematic map</T></View>
+      <View style={{ position: 'absolute', left: 10, bottom: bottomInset + 6, opacity: 0.6 }} pointerEvents="none"><T v="caption" muted>Demo · schematic map</T></View>
     </View>
   );
 }

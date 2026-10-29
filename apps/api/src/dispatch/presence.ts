@@ -154,6 +154,8 @@ export async function nearbyDrivers(
         AND d.status = 'verified' AND d.deleted_at IS NULL
         AND (d.paused_until IS NULL OR d.paused_until <= now())
         AND d.user_id <> $4
+        -- Drivers this passenger asked never to be matched with again.
+        AND NOT EXISTS (SELECT 1 FROM passenger_blocked_drivers pb WHERE pb.user_id = $4 AND pb.driver_id = d.id)
         AND EXISTS (SELECT 1 FROM subscriptions s
                      WHERE s.driver_id = d.id AND s.status = 'active'
                        AND s.starts_at <= now() AND s.ends_at > now())

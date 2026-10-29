@@ -1,15 +1,15 @@
-// Passenger app shell: language → phone → code, then three tabs (Taxi, Rides, Profile). An active ride
-// takes over the Taxi tab; a finished ride shows the rating screen; pushed screens sit on top.
+// Passenger app shell: language → phone → code, then the map (home, or the active ride) with a side
+// menu; a finished ride shows the rating screen; pushed screens sit on top.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Pressable, StyleSheet, View } from 'react-native';
+import { StyleSheet, View } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
-import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-context';
+import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { api, DEMO, errorText, loadToken, onUnauthorized, saveToken, setApiLanguage } from './api';
 import { App as AppContext, useApp, type Draft, type Route } from './context';
 import { DICTS, type Lang } from './i18n';
 import { RideProvider, useRide } from './ride';
-import { space, ThemeProvider, useTheme } from './theme';
+import { ThemeProvider, useTheme } from './theme';
 import type { Me } from './types';
 import { T } from './components/ui';
 import { CodeScreen, LanguageScreen, PhoneScreen } from './screens/Auth';
@@ -19,10 +19,10 @@ import { OrderScreen } from './screens/Order';
 import { RideScreen } from './screens/Ride';
 import { EndedNotice, RateScreen } from './screens/Rate';
 import { RideDetailsScreen, RidesScreen } from './screens/Rides';
-import { AddCardScreen, CardsScreen, DebtsScreen, PlacesScreen, ProfileScreen } from './screens/Profile';
+import { AboutScreen, AddCardScreen, BlockedScreen, CardsScreen, DebtsScreen, PlacesScreen, ProfileScreen } from './screens/Profile';
+import { Menu } from './screens/Menu';
 
 type Auth = { step: 'language' } | { step: 'phone' } | { step: 'code'; phone: string };
-type Tab = 'taxi' | 'rides' | 'profile';
 
 export function App() {
   return (
@@ -96,7 +96,7 @@ function Root() {
 function Main({ stack }: { stack: Route[] }) {
   const { ride, ended, clearEnded } = useRide();
   const { push, setDraft } = useApp();
-  const [tab, setTab] = useState<Tab>('taxi');
+  const [menu, setMenu] = useState(false);
   const keys = useRef(new WeakMap<Route, number>());
   const keySeq = useRef(0);
 
@@ -113,6 +113,10 @@ function Main({ stack }: { stack: Route[] }) {
       case 'places': el = <PlacesScreen />; break;
       case 'rideDetails': el = <RideDetailsScreen rideId={r.rideId} />; break;
       case 'debts': el = <DebtsScreen />; break;
+      case 'profile': el = <ProfileScreen />; break;
+      case 'rides': el = <RidesScreen />; break;
+      case 'blocked': el = <BlockedScreen />; break;
+      case 'about': el = <AboutScreen />; break;
     }
     return <View key={keys.current.get(r)} style={{ ...StyleSheet.absoluteFillObject, display: i === stack.length - 1 ? 'flex' : 'none' }}>{el}</View>;
   });
@@ -128,12 +132,8 @@ function Main({ stack }: { stack: Route[] }) {
   } else {
     base = (
       <>
-        <View style={{ flex: 1 }}>
-          {tab === 'taxi' && (ride ? <RideScreen ride={ride} /> : <HomeScreen />)}
-          {tab === 'rides' && <RidesScreen />}
-          {tab === 'profile' && <ProfileScreen />}
-        </View>
-        <TabBar tab={tab} setTab={setTab} live={!!ride} />
+        {ride ? <RideScreen ride={ride} onMenu={() => setMenu(true)} /> : <HomeScreen onMenu={() => setMenu(true)} />}
+        {menu && <Menu onClose={() => setMenu(false)} />}
       </>
     );
   }
@@ -142,27 +142,6 @@ function Main({ stack }: { stack: Route[] }) {
     <View style={{ flex: 1 }}>
       <View style={{ flex: 1, display: stack.length ? 'none' : 'flex' }}>{base}</View>
       {screens}
-    </View>
-  );
-}
-
-function TabBar({ tab, setTab, live }: { tab: Tab; setTab: (t: Tab) => void; live: boolean }) {
-  const { c } = useTheme();
-  const insets = useSafeAreaInsets();
-  const { t } = useApp();
-  const tabs: { key: Tab; label: string }[] = [{ key: 'taxi', label: t.tabTaxi }, { key: 'rides', label: t.tabRides }, { key: 'profile', label: t.tabProfile }];
-  return (
-    <View style={{ flexDirection: 'row', borderTopWidth: 1, borderTopColor: c.border, backgroundColor: c.surfaceCard, paddingBottom: insets.bottom }}>
-      {tabs.map((x) => {
-        const on = x.key === tab;
-        return (
-          <Pressable key={x.key} accessibilityRole="tab" accessibilityState={{ selected: on }} onPress={() => setTab(x.key)}
-            style={{ flex: 1, minHeight: 56, alignItems: 'center', justifyContent: 'center', gap: 2, paddingTop: space.s1 }}>
-            <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: x.key === 'taxi' && live ? c.success : on ? c.brand : 'transparent' }} />
-            <T v="label" color={on ? c.link : c.inkMuted} style={{ textTransform: 'none', letterSpacing: 0, fontSize: 12 }}>{x.label}</T>
-          </Pressable>
-        );
-      })}
     </View>
   );
 }

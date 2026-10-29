@@ -4,12 +4,16 @@
 export type Lang = 'uz' | 'ru' | 'en';
 
 const uz = {
+  myProfile: 'Mening profilim', rating: 'Reyting', about: 'Xizmat haqida', becomeDriver: 'Haydovchi boʻling', becomeDriverHint: 'Komissiyasiz — faqat obuna',
+  personalData: 'Shaxsiy maʼlumotlar', blacklist: 'Qora roʻyxat', blockDriver: 'Bu haydovchini menga boshqa yubormang', blockedDone: 'Bu haydovchi sizga endi tushmaydi', noBlocked: 'Roʻyxat boʻsh',
+  deleteAccount: 'Hisobni oʻchirish', deleteConfirm: 'Ism, telefon, manzillar va kartalar oʻchiriladi. Safarlar buxgalteriya uchun shaxsiy maʼlumotlarsiz saqlanadi. Buni qaytarib boʻlmaydi.', deleteForever: 'Ha, oʻchirish',
+  aboutText: 'Haydovchilar safar uchun komissiya toʻlamaydi — faqat obuna. Narxni server hisoblaydi: siz tasdiqlagan narxdan qimmat toʻlamaysiz.', mapData: 'Xarita maʼlumotlari: © OpenStreetMap mualliflari', version: 'Versiya', notRatedYet: '5 ta safardan keyin',
   cheaper: 'Arzonroq', faster: 'Tezroq', bestOption: 'Eng yaxshi variant',
   cheaperHint: 'Narx pastroq, mashina kelishi uzoqroq boʻlishi mumkin', fasterHint: 'Eng yaqin mashina, narx biroz yuqoriroq', bestHint: 'Eng yaqin mashina eng yaxshi narxda',
   pickupApprox: 'Kelish ≈', noCarsClass: 'Hozir yaqinda bu sinfda boʻsh mashina yoʻq', searchAnyway: 'Baribir qidirish (5 daqiqagacha)', priceAtMost: 'Narx bundan oshmaydi:', wishes: 'Istaklar va izoh', seats: 'oʻrin',
   phoneTitle: 'Telefon raqamingiz', phoneHint: 'Kodni SMS orqali yuboramiz', getCode: 'Kod olish',
   codeTitle: 'SMS kodi', codeHint: 'raqamiga yuborildi', signIn: 'Kirish', change: 'Oʻzgartirish',
-  from: 'Qayerdan', where: 'Qayerga?', myLocation: 'Joylashuvim', locating: 'Joylashuv aniqlanmoqda…',
+  from: 'Qayerdan', where: 'Qayerga boramiz?', myLocation: 'Joylashuvim', locating: 'Joylashuv aniqlanmoqda…',
   home: 'Uy', work: 'Ish', setHome: 'Uy manzilini qoʻshing', setWork: 'Ish manzilini qoʻshing', recent: 'Yaqinda',
   searchPlaceholder: 'Manzil yoki joy nomi', noResults: 'Hech narsa topilmadi', search: 'Qidirish',
   entrance: 'Podyezd', entranceHint: 'Haydovchi aynan shu podyezdga keladi', entranceOther: 'Boshqa', entranceNumber: 'Podyezd raqami',
@@ -35,7 +39,6 @@ const uz = {
   reportUnsafe: 'Xavfli haydash', call102: '102 ga qoʻngʻiroq',
   rateTitle: 'Safar qanday oʻtdi?', liked: 'Nima yoqdi?', disliked: 'Nima yoqmadi?', reason: 'Izoh', send: 'Yuborish', skip: 'Keyinroq', thanks: 'Rahmat!',
   total: 'Jami', ride: 'Safar', waiting: 'Kutish',
-  tabTaxi: 'Taksi', tabRides: 'Safarlar', tabProfile: 'Profil',
   myRides: 'Safarlarim', noRides: 'Hali safarlar yoʻq', completed: 'Yakunlandi', cancelled: 'Bekor qilindi',
   complaint: 'Shikoyat', dispute: 'Nizo', openDispute: 'Nizo ochish', yourAccount: 'Sizning bayoningiz', theirAccount: 'Haydovchi bayoni',
   disputeHint: 'Ikkala tomon nima boʻlganini yozadi, moderator hal qiladi. 72 soat ichida.',
@@ -54,7 +57,7 @@ const uz = {
     price: 'Narx', route: 'Yoʻnalish', behavior: 'Xulq', cancellation: 'Bekor qilish', vehicle: 'Mashina', lost_item: 'Unutilgan narsa', safety: 'Xavfsizlik', other: 'Boshqa',
   },
   errors: {
-    network: 'Internet aloqasi yoʻq. Qayta urinib koʻring', unpaid_debt: 'Avval qarzni toʻlang', active_ride_exists: 'Sizda faol safar bor', price_out_of_range: 'Narx eskirdi, qayta urinib koʻring',
+    network: 'Internet aloqasi yoʻq. Qayta urinib koʻring', active_ride: 'Avval safarni yakunlang', too_many_blocked: 'Roʻyxat toʻla', unpaid_debt: 'Avval qarzni toʻlang', active_ride_exists: 'Sizda faol safar bor', price_out_of_range: 'Narx eskirdi, qayta urinib koʻring',
     card_not_found: 'Karta topilmadi', routing_unavailable: 'Yoʻnalishni hisoblab boʻlmadi', too_many_rides: 'Juda koʻp buyurtma. Keyinroq urinib koʻring',
     blocked: 'Hisobingiz bloklangan', price_changed: 'Narx oʻzgardi, qayta tekshiring', geo_unavailable: 'Qidiruv vaqtincha ishlamayapti',
     offer_unavailable: 'Bu haydovchi band boʻlib qoldi', invalid_card_token: 'Kartani qoʻshib boʻlmadi', card_already_added: 'Bu karta allaqachon qoʻshilgan',
@@ -67,12 +70,16 @@ const uz = {
 export type Dict = typeof uz;
 
 const ru: Dict = {
+  myProfile: 'Мой профиль', rating: 'Рейтинг', about: 'О сервисе', becomeDriver: 'Стань водителем', becomeDriverHint: 'Без комиссии — только подписка',
+  personalData: 'Личные данные', blacklist: 'Чёрный список', blockDriver: 'Больше не назначать мне этого водителя', blockedDone: 'Этот водитель вам больше не попадётся', noBlocked: 'Список пуст',
+  deleteAccount: 'Удалить аккаунт', deleteConfirm: 'Удалим имя, телефон, адреса и карты. Поездки останутся для бухгалтерии, но без ваших данных. Отменить нельзя.', deleteForever: 'Да, удалить',
+  aboutText: 'Водители не платят комиссию с поездок — только подписку. Цену считает сервер: дороже подтверждённой вы не заплатите.', mapData: 'Данные карты: © участники OpenStreetMap', version: 'Версия', notRatedYet: 'после 5 поездок',
   cheaper: 'Подешевле', faster: 'Побыстрее', bestOption: 'Лучший вариант',
   cheaperHint: 'Цена ниже, машина может ехать дольше', fasterHint: 'Ближайшая машина, цена чуть выше', bestHint: 'Ближайшая машина по лучшей цене',
   pickupApprox: 'Подача ≈', noCarsClass: 'Сейчас рядом нет свободных машин этого класса', searchAnyway: 'Всё равно искать (до 5 минут)', priceAtMost: 'Цена не выше:', wishes: 'Пожелания и комментарий', seats: 'мест',
   phoneTitle: 'Ваш номер телефона', phoneHint: 'Пришлём код по SMS', getCode: 'Получить код',
   codeTitle: 'Код из SMS', codeHint: 'Отправили на номер', signIn: 'Войти', change: 'Изменить',
-  from: 'Откуда', where: 'Куда?', myLocation: 'Моё местоположение', locating: 'Определяем местоположение…',
+  from: 'Откуда', where: 'Куда едем?', myLocation: 'Моё местоположение', locating: 'Определяем местоположение…',
   home: 'Дом', work: 'Работа', setHome: 'Добавьте адрес дома', setWork: 'Добавьте адрес работы', recent: 'Недавние',
   searchPlaceholder: 'Адрес или название места', noResults: 'Ничего не нашли', search: 'Поиск',
   entrance: 'Подъезд', entranceHint: 'Водитель подъедет именно к этому подъезду', entranceOther: 'Другой', entranceNumber: 'Номер подъезда',
@@ -98,7 +105,6 @@ const ru: Dict = {
   reportUnsafe: 'Опасное вождение', call102: 'Позвонить 102',
   rateTitle: 'Как прошла поездка?', liked: 'Что понравилось?', disliked: 'Что не понравилось?', reason: 'Комментарий', send: 'Отправить', skip: 'Позже', thanks: 'Спасибо!',
   total: 'Итого', ride: 'Поездка', waiting: 'Ожидание',
-  tabTaxi: 'Такси', tabRides: 'Поездки', tabProfile: 'Профиль',
   myRides: 'Мои поездки', noRides: 'Поездок пока нет', completed: 'Завершена', cancelled: 'Отменена',
   complaint: 'Жалоба', dispute: 'Спор', openDispute: 'Открыть спор', yourAccount: 'Ваше описание', theirAccount: 'Описание водителя',
   disputeHint: 'Обе стороны пишут, что произошло, решает модератор. В течение 72 часов.',
@@ -117,7 +123,7 @@ const ru: Dict = {
     price: 'Цена', route: 'Маршрут', behavior: 'Поведение', cancellation: 'Отмена', vehicle: 'Машина', lost_item: 'Забытая вещь', safety: 'Безопасность', other: 'Другое',
   },
   errors: {
-    network: 'Нет связи с интернетом. Попробуйте ещё раз', unpaid_debt: 'Сначала оплатите долг', active_ride_exists: 'У вас уже есть активная поездка', price_out_of_range: 'Цена устарела, попробуйте ещё раз',
+    network: 'Нет связи с интернетом. Попробуйте ещё раз', active_ride: 'Сначала завершите поездку', too_many_blocked: 'Список заполнен', unpaid_debt: 'Сначала оплатите долг', active_ride_exists: 'У вас уже есть активная поездка', price_out_of_range: 'Цена устарела, попробуйте ещё раз',
     card_not_found: 'Карта не найдена', routing_unavailable: 'Не удалось построить маршрут', too_many_rides: 'Слишком много заказов. Попробуйте позже',
     blocked: 'Аккаунт заблокирован', price_changed: 'Цена изменилась, проверьте ещё раз', geo_unavailable: 'Поиск временно не работает',
     offer_unavailable: 'Этот водитель уже занят', invalid_card_token: 'Не удалось добавить карту', card_already_added: 'Эта карта уже добавлена',
@@ -128,6 +134,10 @@ const ru: Dict = {
 };
 
 const en: Dict = {
+  myProfile: 'My profile', rating: 'Rating', about: 'About', becomeDriver: 'Become a driver', becomeDriverHint: 'No commission, just a subscription',
+  personalData: 'Personal details', blacklist: 'Blocked drivers', blockDriver: 'Never send me this driver again', blockedDone: 'You won\'t get this driver again', noBlocked: 'The list is empty',
+  deleteAccount: 'Delete account', deleteConfirm: 'We erase your name, phone, places and cards. Rides stay for accounting, without your details. This cannot be undone.', deleteForever: 'Yes, delete',
+  aboutText: 'Drivers pay no commission on rides, only a subscription. The server sets the price: you never pay more than you confirmed.', mapData: 'Map data: © OpenStreetMap contributors', version: 'Version', notRatedYet: 'after 5 rides',
   cheaper: 'Cheaper', faster: 'Faster', bestOption: 'Best option',
   cheaperHint: 'Lower price, the car may take longer', fasterHint: 'Nearest car, slightly higher price', bestHint: 'The nearest car at the best price',
   pickupApprox: 'Pickup ≈', noCarsClass: 'No free cars of this class nearby right now', searchAnyway: 'Search anyway (up to 5 minutes)', priceAtMost: 'Price at most:', wishes: 'Wishes and note', seats: 'seats',
@@ -159,7 +169,6 @@ const en: Dict = {
   reportUnsafe: 'Unsafe driving', call102: 'Call 102',
   rateTitle: 'How was your ride?', liked: 'What did you like?', disliked: 'What went wrong?', reason: 'Comment', send: 'Send', skip: 'Later', thanks: 'Thank you!',
   total: 'Total', ride: 'Ride', waiting: 'Waiting',
-  tabTaxi: 'Taxi', tabRides: 'Rides', tabProfile: 'Profile',
   myRides: 'My rides', noRides: 'No rides yet', completed: 'Completed', cancelled: 'Cancelled',
   complaint: 'Complaint', dispute: 'Dispute', openDispute: 'Open a dispute', yourAccount: 'Your account', theirAccount: 'The driver\'s account',
   disputeHint: 'Both sides write what happened; a moderator decides. Within 72 hours.',
@@ -178,7 +187,7 @@ const en: Dict = {
     price: 'Price', route: 'Route', behavior: 'Behaviour', cancellation: 'Cancellation', vehicle: 'Car', lost_item: 'Lost item', safety: 'Safety', other: 'Other',
   },
   errors: {
-    network: 'No connection. Please try again', unpaid_debt: 'Please pay your debt first', active_ride_exists: 'You already have an active ride', price_out_of_range: 'The price is out of date, try again',
+    network: 'No connection. Please try again', active_ride: 'Finish the ride first', too_many_blocked: 'The list is full', unpaid_debt: 'Please pay your debt first', active_ride_exists: 'You already have an active ride', price_out_of_range: 'The price is out of date, try again',
     card_not_found: 'Card not found', routing_unavailable: 'Could not build the route', too_many_rides: 'Too many orders. Try later',
     blocked: 'Your account is blocked', price_changed: 'The price changed, check again', geo_unavailable: 'Search is temporarily unavailable',
     offer_unavailable: 'This driver just became busy', invalid_card_token: 'Could not add the card', card_already_added: 'This card is already added',

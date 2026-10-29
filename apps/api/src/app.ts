@@ -14,6 +14,7 @@ import { routeChangeRoutes } from './rides/changes.ts';
 import { disputeRoutes } from './disputes/routes.ts';
 import { ratingRoutes } from './ratings/routes.ts';
 import { paymentRoutes } from './payments/routes.ts';
+import { accountRoutes } from './account/routes.ts';
 import { complaintRoutes } from './complaints/routes.ts';
 import { adminPeopleRoutes } from './admin/people.ts';
 import { adminPricingRoutes } from './admin/pricing.ts';
@@ -97,6 +98,7 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
   await app.register(fileRoutes);
   await app.register(geoRoutes, { db: deps.db, geo: deps.geo ?? new DevGeoProvider() });
   await app.register(complaintRoutes, { db: deps.db });
+  await app.register(accountRoutes, { db: deps.db, payments: deps.payments });
   await app.register(adminPeopleRoutes, { db: deps.db, cityCode: deps.cityCode });
   await app.register(adminPricingRoutes, { db: deps.db, cityCode: deps.cityCode });
   await app.register(adminOpsRoutes, { db: deps.db, cityCode: deps.cityCode });

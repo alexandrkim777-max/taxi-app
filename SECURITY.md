@@ -140,7 +140,20 @@ every item below has a regression test in `apps/api/test/security.test.ts` or th
 - The demo's pretend server is swapped for an empty stub in real builds (checked: no demo data in the bundle).
 - A 401 from the API signs the app out at once.
 
+## Account deletion and blocked drivers
+
+- `DELETE /me` needs an explicit `{"confirm": true}` and is refused during a ride or while money is owed
+  (an account cannot be deleted to walk away from a debt). Name, phone, saved places, blocked-driver
+  list, login codes and card tokens are erased; sessions are revoked; a driver profile is taken off the
+  map. Rides stay for accounting and disputes but no longer point to a person. The phone number is
+  freed, so signing up again starts a new, empty account.
+- "Never this driver again" works only on the passenger's own ride; the driver is not told; the list is
+  capped at 50 and shows only the first name and car the passenger already saw.
+
 ## Maps and places
+
+- Cars on the passenger's map are approximate (snapped to a ~170 m grid, heading to 45°) and carry no
+  id, name or plate, so the map cannot be used to follow a driver. Signed-in only, 30 requests a minute.
 
 - Address search runs on our own Nominatim; passenger searches and positions never go to a third-party map service.
 - Search is signed-in only and rate-limited (60 per minute per user), queries are 2–120 characters.

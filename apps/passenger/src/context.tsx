@@ -11,7 +11,11 @@ export type Route =
   | { name: 'addCard'; onAdded?: (c: Card) => void }
   | { name: 'places' }
   | { name: 'rideDetails'; rideId: string }
-  | { name: 'debts' };
+  | { name: 'debts' }
+  | { name: 'profile' }
+  | { name: 'rides' }
+  | { name: 'blocked' }
+  | { name: 'about' };
 
 export interface Draft { pickup: Stop | null; stops: Stop[] }
 

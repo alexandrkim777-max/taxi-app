@@ -9,7 +9,7 @@
     "android": "npm run tokens && expo start --android",
     "ios": "npm run tokens && expo start --ios",
     "web": "npm run tokens && expo start --web",
-    "build:demo": "npm run tokens && EXPO_PUBLIC_DEMO=1 expo export --platform web --output-dir dist-demo && node scripts/inline.mjs",
+    "build:demo": "npm run tokens && EXPO_PUBLIC_DEMO=1 EXPO_PUBLIC_DRIVER_APP_URL=https://claude.ai/artifact/1khMoRqhy6Wr5i4KWUPJgf expo export --platform web --output-dir dist-demo && node scripts/inline.mjs",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

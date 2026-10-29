@@ -1,4 +1,5 @@
-// Profile: name, language, theme; saved places; cards (add / default / delete); debts.
+// Profile (name, language, theme, blocked drivers, sign out, delete account), saved places, cards,
+// debts, about.
 
 import { useCallback, useEffect, useState } from 'react';
 import { View } from 'react-native';
@@ -6,20 +7,28 @@ import { api, DEMO } from '../api';
 import { CARD_PROVIDER, expiryOk, luhnOk, ProviderSdkMissing, tokenizeCard } from '../cards';
 import { useApp } from '../context';
 import type { Lang } from '../i18n';
-import { money } from '../format';
+import { money, plate } from '../format';
+import { Icon } from '../components/icons';
 import { space, useTheme, type ThemeMode } from '../theme';
 import type { Card as PayCard, SavedPlace } from '../types';
-import { Badge, Button, Card, Chip, Divider, ErrorNote, Field, Header, ListRow, Pill, Row, Screen, Seg, T } from '../components/ui';
+import { Badge, Button, Card, Chip, Divider, ErrorNote, Field, Header, ListRow, Pill, Row, Screen, Seg, T, Tiles } from '../components/ui';
+
+const APP_VERSION = '0.1.0';
 
 export function ProfileScreen() {
-  const { t, lang, setLang, me, setMe, logout, push, err } = useApp();
-  const { mode, setMode } = useTheme();
+  const { t, lang, setLang, me, setMe, logout, push, pop, err } = useApp();
+  const { c, mode, setMode } = useTheme();
   const [name, setName] = useState(me?.name ?? '');
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [blocked, setBlocked] = useState<number | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [busy, setBusy] = useState(false);
+  useEffect(() => { api<unknown[]>('/me/blocked-drivers').then((l) => setBlocked(l.length)).catch(() => {}); }, []);
   return (
-    <Screen footer={<Button kind="secondary" title={t.logout} onPress={logout} />}>
-      <T v="title">{t.profile}</T>
+    <Screen>
+      <Header title={t.profile} onBack={pop} />
+      <T v="label" muted>{t.personalData}</T>
       <Card>
         <T muted>{me?.phone}</T>
         <Field label={t.name} value={name} onChangeText={(v) => { setName(v); setSaved(false); }} maxLength={80} autoCapitalize="words" />
@@ -28,16 +37,61 @@ export function ProfileScreen() {
             try { await api('/me', { method: 'PATCH', body: { name: name.trim() } }); if (me) setMe({ ...me, name: name.trim() }); setSaved(true); }
             catch (e) { setError(err(e)); }
           }} />
-        <ErrorNote text={error} />
       </Card>
-      <ListRow lead={<Badge text="⌂" />} title={t.places} onPress={() => push({ name: 'places' })} />
-      <ListRow lead={<Badge text="▭" />} title={t.cards} onPress={() => push({ name: 'cards' })} />
-      <ListRow lead={<Badge text="!" />} title={t.debts} onPress={() => push({ name: 'debts' })} />
-      <Divider />
       <T v="caption" muted>{t.language}</T>
       <Seg<Lang> value={lang} onChange={setLang} options={[{ value: 'uz', label: 'Oʻzbekcha' }, { value: 'ru', label: 'Русский' }, { value: 'en', label: 'English' }]} />
       <T v="caption" muted>{t.theme}</T>
       <Seg<ThemeMode> value={mode} onChange={setMode} options={[{ value: 'auto', label: t.themeAuto }, { value: 'day', label: t.themeDay }, { value: 'night', label: t.themeNight }]} />
+      <Divider />
+      <ListRow lead={<Icon name="block" />} title={t.blacklist} right={<T muted>{blocked ?? ''}</T>} onPress={() => push({ name: 'blocked' })} />
+      <ListRow lead={<Icon name="logout" />} title={t.logout} onPress={logout} right={<View />} />
+      <ListRow lead={<Icon name="trash" color={c.danger} />} title={t.deleteAccount} onPress={() => setConfirmDelete(true)} right={<View />} />
+      {confirmDelete && (
+        <Card tone="warm">
+          <T v="heading" color={c.warmInk}>{t.deleteAccount}</T>
+          <T color={c.warmInk}>{t.deleteConfirm}</T>
+          <Button kind="danger" title={t.deleteForever} busy={busy} onPress={async () => {
+            setBusy(true); setError(null);
+            try { await api('/me', { method: 'DELETE', body: { confirm: true } }); logout(); }
+            catch (e) { setError(err(e)); } finally { setBusy(false); }
+          }} />
+          <Button kind="secondary" title={t.back} onPress={() => setConfirmDelete(false)} />
+        </Card>
+      )}
+      <ErrorNote text={error} />
+    </Screen>
+  );
+}
+
+export function BlockedScreen() {
+  const { t, pop, err } = useApp();
+  const [list, setList] = useState<{ id: string; driverName: string | null; makeModel: string | null; plate: string | null }[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const load = useCallback(() => { api<NonNullable<typeof list>>('/me/blocked-drivers').then(setList).catch((e) => setError(err(e))); }, [err]);
+  useEffect(load, [load]);
+  return (
+    <Screen>
+      <Header title={t.blacklist} onBack={pop} />
+      {list?.length === 0 && <T muted>{t.noBlocked}</T>}
+      {list?.map((b) => (
+        <ListRow key={b.id} lead={<Icon name="block" />} title={b.driverName ?? '—'} subtitle={[b.makeModel, b.plate ? plate(b.plate) : null].filter(Boolean).join(' · ')}
+          right={<Chip label={t.remove} onPress={() => api(`/me/blocked-drivers/${b.id}`, { method: 'DELETE' }).then(load).catch((e) => setError(err(e)))} />} />
+      ))}
+      <ErrorNote text={error} />
+    </Screen>
+  );
+}
+
+export function AboutScreen() {
+  const { t, pop } = useApp();
+  return (
+    <Screen>
+      <Header title={t.about} onBack={pop} />
+      <Tiles />
+      <T v="title">Taxi</T>
+      <T>{t.aboutText}</T>
+      <T v="caption" muted>{t.mapData}</T>
+      <T v="caption" muted>{t.version} {APP_VERSION}</T>
     </Screen>
   );
 }

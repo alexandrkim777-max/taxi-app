@@ -8,7 +8,9 @@ import { api, ApiError } from '../api';
 import { useApp } from '../context';
 import { mmss, money, plate } from '../format';
 import { distanceM } from '../location';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { Map } from '../map/Map';
+import { MapButton } from './Menu';
 import type { MapPin } from '../map/types';
 import { useRide } from '../ride';
 import { space, useTheme } from '../theme';
@@ -29,7 +31,7 @@ function stopsOf(ride: Ride): Stop[] {
   }));
 }
 
-export function RideScreen({ ride }: { ride: Ride }) {
+export function RideScreen({ ride, onMenu }: { ride: Ride; onMenu?: () => void }) {
   const { t, lang, push, err } = useApp();
   const { setRide } = useRide();
   const { c } = useTheme();
@@ -150,6 +152,11 @@ export function RideScreen({ ride }: { ride: Ride }) {
   return (
     <View style={{ flex: 1 }}>
       <Map pins={pins} line={line} bottomInset={sheetH} />
+      {onMenu && (
+        <SafeAreaView edges={['top']} style={{ position: 'absolute', top: 0, left: 0 }} pointerEvents="box-none">
+          <View style={{ padding: space.s4 }}><MapButton icon="menu" label="Menu" onPress={onMenu} /></View>
+        </SafeAreaView>
+      )}
       <Sheet onLayoutHeight={setSheetH}>
         {ride.payment.actionRequired && (
           <Card tone="warm">

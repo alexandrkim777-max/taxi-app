@@ -73,6 +73,7 @@ const state: Row = {
   debts: [] as Row[],
   disputes: new Map<string, Row>(),
   complaints: new Set<string>(),
+  blocked: new Map<string, Row>(),
 };
 
 function haversine(a: { lat: number; lng: number }, b: { lat: number; lng: number }): number {
@@ -230,6 +231,27 @@ export async function mockApi(method: string, rawPath: string, body: any): Promi
   if (method === 'POST' && path === '/auth/logout') return ok({});
   if (method === 'GET' && path === '/me') return ok(state.user);
   if (method === 'PATCH' && path === '/me') { Object.assign(state.user, body); if (body.language) lang = body.language; return ok(state.user); }
+
+  if (method === 'DELETE' && path === '/me') {
+    if (state.activeId) return fail(409, 'active_ride');
+    if (state.debts.length) return fail(402, 'unpaid_debt');
+    Object.assign(state.user, { name: null }); state.places = []; state.cards = []; state.blocked.clear();
+    return ok(null, 204);
+  }
+  if (method === 'GET' && path === '/me/ratings') return ok({ asPassenger: { rating: 4.96, count: 23, completedRides: 23, cancelledRides: 1 }, asDriver: null });
+  if (method === 'GET' && path === '/me/blocked-drivers') return ok([...state.blocked.values()]);
+  if ((x = m(/^\/me\/blocked-drivers\/([\w-]+)$/)) && method === 'DELETE') { state.blocked.delete(x[1]!); return ok(null, 204); }
+  if (method === 'GET' && path === '/geo/cars') {
+    // Free cars around, snapped to a grid like the real server; they drift a little between calls.
+    const lat = Number(q.get('lat')), lng = Number(q.get('lng'));
+    const t = Math.floor(now() / 15_000);
+    const offsets = [[0.004, -0.003], [-0.003, 0.005], [0.006, 0.006], [-0.006, -0.004], [0.001, 0.009], [-0.008, 0.002]];
+    return ok({ cars: offsets.map(([a, b], i) => ({
+      lat: Math.round((lat + a! + ((t + i) % 3) * 0.0015) / 0.0015) * 0.0015,
+      lng: Math.round((lng + b!) / 0.002) * 0.002,
+      heading: ((i * 90 + t * 45) % 360),
+    })) });
+  }
 
   // --- Places ---
   if (method === 'GET' && path === '/geo/search') {
@@ -399,6 +421,11 @@ export async function mockApi(method: string, rawPath: string, body: any): Promi
     r.stops = body.stops.map((s: Row, i: number) => ({ lat: s.lat, lng: s.lng, address: s.address, entrance: i === 0 ? s.entranceLabel ?? null : null }));
     r.route = nr; r.priceTiyin = newPrice;
     return ok(rideView(r));
+  }
+  if (method === 'POST' && sub === '/block-driver') {
+    if (!r.driver) return fail(409, 'no_driver_assigned');
+    if (![...state.blocked.values()].some((b: Row) => b.plate === r.driver.plate)) { const id = uuid(); state.blocked.set(id, { id, driverName: r.driver.name, makeModel: r.driver.car, plate: r.driver.plate, createdAt: iso(now()) }); }
+    return ok(null, 204);
   }
   if (method === 'POST' && sub === '/rating') { r.myScore = body.score; return ok({ ok: true }, 201); }
   if (method === 'POST' && sub === '/complaint') {

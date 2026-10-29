@@ -2,6 +2,7 @@
 
 import type { FastifyInstance } from 'fastify';
 import type pg from 'pg';
+import { PRESENCE_TTL_SEC } from '../dispatch/presence.ts';
 import { requireUser } from '../auth/session.ts';
 import { UZ_LAT, UZ_LNG, uuidParams } from '../lib/geo.ts';
 import { HttpError } from '../lib/tx.ts';
@@ -15,6 +16,10 @@ interface Deps {
 }
 
 const MAX_OTHER_PLACES = 10;
+/** Cars shown on the passenger's map: within 3 km, snapped to a ~170 m grid. */
+const CARS_RADIUS_M = 3000;
+const GRID_LAT = 0.0015;
+const GRID_LNG = 0.002;
 const ENTRANCE_RADIUS_M = 120;
 
 const placeBody = {
@@ -90,6 +95,45 @@ export async function geoRoutes(app: FastifyInstance, { db, geo }: Deps): Promis
         [request.query.lat, request.query.lng, ENTRANCE_RADIUS_M],
       );
       return rows;
+    },
+  );
+
+  // Free cars around the passenger, for the map. Deliberately approximate: positions are snapped to a
+  // ~170 m grid and headings to 45°, with no ids, names or plates, so the map cannot be used to follow
+  // a particular driver. Signed-in only and rate-limited.
+  app.get<{ Querystring: { lat: number; lng: number } }>(
+    '/geo/cars',
+    {
+      preHandler: requireUser,
+      config: { rateLimit: { max: 30, timeWindow: '1 minute' } },
+      schema: { querystring: { type: 'object', required: ['lat', 'lng'], additionalProperties: false, properties: { lat: UZ_LAT, lng: UZ_LNG } } },
+    },
+    async (request) => {
+      const { rows } = await db.query<{ lat: number; lng: number; heading: number | null }>(
+        `WITH me AS (SELECT ST_SetSRID(ST_MakePoint($2, $1), 4326)::geography AS g)
+         SELECT ST_Y(p.point::geometry) AS lat, ST_X(p.point::geometry) AS lng, p.heading
+           FROM driver_presence p
+           JOIN drivers d ON d.id = p.driver_id
+           CROSS JOIN me
+          WHERE p.status = 'online' AND p.updated_at > now() - make_interval(secs => $4)
+            AND d.status = 'verified' AND d.deleted_at IS NULL AND d.user_id <> $3
+            AND ST_DWithin(p.point, me.g, $5)
+          ORDER BY p.point <-> me.g
+          LIMIT 40`,
+        [request.query.lat, request.query.lng, request.user!.id, PRESENCE_TTL_SEC, CARS_RADIUS_M],
+      );
+      const seen = new Set<string>();
+      const cars: { lat: number; lng: number; heading: number | null }[] = [];
+      for (const r of rows) {
+        const lat = Math.round(r.lat / GRID_LAT) * GRID_LAT;
+        const lng = Math.round(r.lng / GRID_LNG) * GRID_LNG;
+        const key = `${lat.toFixed(4)},${lng.toFixed(4)}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        cars.push({ lat: Number(lat.toFixed(5)), lng: Number(lng.toFixed(5)), heading: r.heading === null ? null : (Math.round(r.heading / 45) * 45) % 360 });
+        if (cars.length === 15) break;
+      }
+      return { cars };
     },
   );
 

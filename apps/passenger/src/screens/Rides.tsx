@@ -13,12 +13,12 @@ const COMPLAINT_TYPES = ['rude', 'unsafe_driving', 'asked_extra_cash', 'car_mism
 const CATEGORIES = ['price', 'route', 'behavior', 'cancellation', 'vehicle', 'lost_item', 'safety', 'other'] as const;
 
 export function RidesScreen() {
-  const { t, lang, push } = useApp();
+  const { t, lang, push, pop } = useApp();
   const [rides, setRides] = useState<PastRide[] | null>(null);
   useEffect(() => { api<PastRide[]>('/me/rides').then(setRides).catch(() => setRides([])); }, []);
   return (
     <Screen>
-      <T v="title">{t.myRides}</T>
+      <Header title={t.myRides} onBack={pop} />
       {rides?.length === 0 && <T muted>{t.noRides}</T>}
       {rides?.map((r, i) => (
         <View key={r.id}>
@@ -109,6 +109,7 @@ export function RideDetailsScreen({ rideId }: { rideId: string }) {
         <Row>
           <Chip label={t.complaint} onPress={() => { setForm('complaint'); setNote(null); }} />
           {!dispute && <Chip label={t.openDispute} onPress={() => { setForm('dispute'); setNote(null); }} />}
+          {note !== t.blockedDone && <Chip tone="warm" label={t.blockDriver} onPress={() => api(`/rides/${rideId}/block-driver`, { body: {} }).then(() => setNote(t.blockedDone)).catch((e) => setError(err(e)))} />}
         </Row>
       )}
 

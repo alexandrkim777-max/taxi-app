@@ -22,6 +22,7 @@ export function RateScreen({ ride, onDone }: { ride: Ride; onDone: () => void })
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [sent, setSent] = useState(false);
+  const [blocked, setBlocked] = useState(false);
 
   useEffect(() => { api<Tags>('/rating-tags?about=driver').then(setTags).catch(() => {}); }, []);
   useEffect(() => { setPicked([]); }, [score >= 4]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -75,7 +76,11 @@ export function RateScreen({ ride, onDone }: { ride: Ride; onDone: () => void })
       </Row>
       {score > 0 && <Field label={t.reason} value={reason} onChangeText={setReason} maxLength={300} multiline />}
       {score > 0 && score < 4 && (
-        <View><Button kind="ghost" compact title={`${t.complaint} / ${t.dispute}`} onPress={() => push({ name: 'rideDetails', rideId: ride.id })} /></View>
+        <View>
+          <Button kind="ghost" compact title={blocked ? `✓ ${t.blockedDone}` : t.blockDriver} disabled={blocked}
+            onPress={() => api(`/rides/${ride.id}/block-driver`, { body: {} }).then(() => setBlocked(true)).catch((e) => setError(err(e)))} />
+          <Button kind="ghost" compact title={`${t.complaint} / ${t.dispute}`} onPress={() => push({ name: 'rideDetails', rideId: ride.id })} />
+        </View>
       )}
       <ErrorNote text={error} />
       {needsReason && <T v="caption" color={c.inkMuted}>{t.disliked}</T>}

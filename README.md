@@ -88,6 +88,10 @@ Tests: `npm test` (the API integration tests need a migrated database at `DATABA
 | GET | `/geo/entrances?lat=&lng=` | user | Known entrances (подъезды) within 120 m of a pickup |
 | GET / PUT / POST / DELETE | `/me/places`, `/me/places/home`, `/me/places/work`, `/me/places/:id` | user | Saved places: home, work and up to 10 more |
 | GET | `/me/rides?before=` | user | Past rides (20 per page): price, addresses, driver, car, whether a dispute is open |
+| GET | `/geo/cars?lat=&lng=` | user | Free cars within 3 km for the map: positions snapped to a ~170 m grid, no ids or names |
+| POST | `/rides/:id/block-driver` | passenger | Never match me with this ride's driver again (the driver is not told) |
+| GET / DELETE | `/me/blocked-drivers`, `/me/blocked-drivers/:id` | user | The list; remove from it |
+| DELETE | `/me` | user | Deletes the account (`{"confirm": true}`); refused during a ride or with unpaid amounts |
 | POST | `/rides/:id/complaint` | participants | Complaint about the ride (rude, unsafe driving, asked for extra cash, …) |
 
 ### Driver app
@@ -119,8 +123,12 @@ npm run build:demo                      # clickable web demo with a pretend serv
 ```
 
 - Language first (uz / ru / en), SMS login.
-- Map with the pickup pin (drag the map to move it), "Where to?" search on our own geocoder, home / work /
-  saved places, recent destinations.
+- Laid out the way passengers know from other taxi apps: the map over the whole screen with free cars
+  around (approximate), the menu button, and a sheet with "From", "Where to?" with home / work buttons
+  and a strip of saved and recent places. Drag the map to move the pickup pin.
+- Side menu: profile and rating, my rides, payment, saved places, debts, about, "become a driver"
+  (a link to the driver app, `EXPO_PUBLIC_DRIVER_APP_URL`).
+- Profile: name, language, theme, blocked drivers, sign out, delete account (required by the stores).
 - Order: entrance chips (learnt from earlier pickups) or a typed entrance number, extra stops, the class,
   then "Cheaper" or "Faster" (or one "Best option") with price and ≈ pickup time; an admin coefficient
   other than 1 is shown openly; cash or a saved card; wishes and a note behind one tap.
