@@ -2,6 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import type pg from 'pg';
 import { requireStaff, requireUser } from '../auth/session.ts';
 import { audit } from '../admin/audit.ts';
+import { fileService, MAX_UPLOAD_BYTES } from '../files/index.ts';
 
 export const REQUIRED_DOCUMENTS = ['passport', 'license', 'vehicle_registration', 'selfie', 'self_employed'] as const;
 
@@ -39,6 +40,8 @@ export async function driverProfile(db: pg.Pool, driverId: string) {
     [driverId],
   );
   const present = new Set(documents.rows.map((d) => d.type));
+  // Documents are private: only short-lived signed links leave the server.
+  for (const d of documents.rows as { fileUrl?: string | null }[]) d.fileUrl = fileService().signedUrl(d.fileUrl ?? null);
   return {
     ...driver.rows[0],
     vehicles: vehicles.rows,
@@ -152,6 +155,44 @@ export async function driverRoutes(app: FastifyInstance, { db, fileBaseUrl, city
         `INSERT INTO driver_documents (driver_id, type, file_url) VALUES ($1, $2, $3)
          RETURNING id, type, status, created_at`,
         [driverId, type, fileUrl],
+      );
+      return reply.code(201).send(rows[0]);
+    },
+  );
+
+  // Photo upload straight from the app: the request body is the image itself (image/jpeg, png,
+  // webp or heic), at most 8 MB. Its real type is checked from its bytes.
+  for (const ct of ['image/jpeg', 'image/png', 'image/webp', 'image/heic']) {
+    if (!app.hasContentTypeParser(ct)) {
+      app.addContentTypeParser(ct, { parseAs: 'buffer', bodyLimit: MAX_UPLOAD_BYTES }, (_req, body, done) => done(null, body));
+    }
+  }
+  app.post<{ Params: { type: string }; Body: Buffer }>(
+    '/drivers/me/documents/:type/photo',
+    {
+      preHandler: requireUser,
+      bodyLimit: MAX_UPLOAD_BYTES,
+      config: { rateLimit: { max: 20, timeWindow: '1 minute' } },
+      schema: { params: { type: 'object', required: ['type'], properties: { type: { type: 'string', enum: [...REQUIRED_DOCUMENTS] } } } },
+    },
+    async (request, reply) => {
+      const driverId = await driverIdFor(db, request.user!.id);
+      if (!driverId) return reply.code(404).send({ error: 'not_a_driver' });
+      if (!Buffer.isBuffer(request.body)) return reply.code(415).send({ error: 'unsupported_file' });
+      let ref: string;
+      try {
+        ref = await fileService().saveImage(`docs/${driverId.replace(/-/g, '')}`, request.body);
+      } catch (err) {
+        if ((err as { statusCode?: number }).statusCode === 415) return reply.code(415).send({ error: 'unsupported_file' });
+        throw err;
+      }
+      await db.query(
+        `UPDATE driver_documents SET deleted_at = now() WHERE driver_id = $1 AND type = $2 AND deleted_at IS NULL`,
+        [driverId, request.params.type],
+      );
+      const { rows } = await db.query(
+        `INSERT INTO driver_documents (driver_id, type, file_url) VALUES ($1, $2, $3) RETURNING id, type, status, created_at`,
+        [driverId, request.params.type, ref],
       );
       return reply.code(201).send(rows[0]);
     },

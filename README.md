@@ -48,7 +48,8 @@ Tests: `npm test` (the API integration tests need a migrated database at `DATABA
 | POST | `/drivers/apply` | user | Becomes a driver (status `pending`) |
 | GET | `/drivers/me` | driver | Profile, vehicles, documents, missing document types |
 | POST | `/drivers/me/vehicles` | driver | Adds a car; the class is set by a moderator |
-| POST | `/drivers/me/documents` | driver | Uploads a document link; replaces the previous one of that type |
+| POST | `/drivers/me/documents/:type/photo` | driver | Uploads a document photo (body = the image, max 8 MB); replaces the previous one |
+| GET | `/files/*?exp=&sig=` | signed link | A private file; links are issued for 10 minutes to the owner and staff only |
 | GET | `/admin/drivers?status=pending` | staff | Moderation queue |
 | POST | `/admin/drivers/:id/approve` | staff | Assigns the class, approves documents, starts the free trial month |
 | POST | `/admin/drivers/:id/reject` | staff | Rejects with a reason the driver sees |

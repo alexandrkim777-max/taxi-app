@@ -64,4 +64,8 @@ export const config = {
   paymentTokenKey,
   paymentReturnUrl: process.env.PAYMENT_RETURN_URL ?? 'taxiapp://payment-result',
   paymentWebhookIps: webhookIps(),
+  /** Where private files (driver documents) are kept. */
+  fileStorageDir: process.env.FILE_STORAGE_DIR ?? './var/files',
+  /** Public base URL of this API, used in signed file links (e.g. https://example.uz/api). */
+  publicApiUrl: process.env.PUBLIC_API_URL ?? `http://localhost:${process.env.PORT ?? 3000}`,
 };

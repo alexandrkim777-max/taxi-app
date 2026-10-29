@@ -9,3 +9,4 @@ dist/
 coverage/
 apps/admin/dist/
 apps/admin/dist-demo/
+apps/api/var/

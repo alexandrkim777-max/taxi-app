@@ -9,6 +9,7 @@ import { PaymentService } from './payments/service.ts';
 import { FakeFiscalProvider } from './payments/fiscal.ts';
 import { DEV_TOKEN_KEY } from './payments/crypto.ts';
 import { prepayTick } from './payments/prepay.ts';
+import { FileService, LocalFileStorage } from './files/index.ts';
 
 const payments = new PaymentService({
   db: pool,
@@ -21,6 +22,11 @@ const payments = new PaymentService({
 const app = await buildApp({
   db: pool,
   payments,
+  files: new FileService({
+    storage: new LocalFileStorage(config.fileStorageDir),
+    secret: `${config.authSecret}:files`,
+    publicApiUrl: config.publicApiUrl,
+  }),
   paymentReturnUrl: config.paymentReturnUrl,
   paymentWebhookIps: config.paymentWebhookIps,
   devRoutes: !config.isProduction && config.paymentProviders.includes('fake'),

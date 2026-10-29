@@ -11,6 +11,15 @@ import { PaymentService } from '../src/payments/service.ts';
 import { FakeProvider } from '../src/payments/providers/fake.ts';
 import { FakeFiscalProvider } from '../src/payments/fiscal.ts';
 import { DEV_TOKEN_KEY } from '../src/payments/crypto.ts';
+import { FileService, LocalFileStorage } from '../src/files/index.ts';
+import { mkdtempSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+
+export const testFiles = new FileService({
+  storage: new LocalFileStorage(mkdtempSync(join(tmpdir(), 'taxi-files-'))),
+  secret: 'test-file-secret', publicApiUrl: 'http://api.test',
+});
 
 export const fakeProvider = new FakeProvider({ secret: 'test-fake-secret', baseUrl: 'http://localhost:3000' });
 
@@ -44,7 +53,7 @@ export function payments(): PaymentService {
 export async function setup(opts: { rateLimit?: boolean } = {}) {
   const sms = new CapturingSms();
   const app = await buildApp({
-    db, sms, payments: payments(), devRoutes: true, authSecret: 'test-secret', routes: new EstimateRouteProvider(),
+    db, sms, payments: payments(), files: testFiles, devRoutes: true, authSecret: 'test-secret', routes: new EstimateRouteProvider(),
     fileBaseUrl: 'https://files.example/', cityCode: 'tashkent', rateLimit: opts.rateLimit ?? false,
   });
   async function login(phone: string): Promise<string> {

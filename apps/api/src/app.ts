@@ -20,6 +20,8 @@ import { adminPricingRoutes } from './admin/pricing.ts';
 import { adminOpsRoutes } from './admin/ops.ts';
 import type { PaymentService } from './payments/service.ts';
 import type { ProviderName } from './payments/types.ts';
+import { setFileService, type FileService } from './files/index.ts';
+import { fileRoutes } from './files/routes.ts';
 
 export interface AppDeps {
   db: pg.Pool;
@@ -38,6 +40,8 @@ export interface AppDeps {
   paymentWebhookIps?: Partial<Record<ProviderName, string[]>>;
   /** Development helper pages for the fake payment provider; never in production. */
   devRoutes?: boolean;
+  /** Private document storage with signed links. */
+  files: FileService;
 }
 
 /** Builds the API without starting it, so tests can call it via app.inject(). */
@@ -67,6 +71,7 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
     await app.register(rateLimit, { global: true, max: 120, timeWindow: '1 minute' });
   }
 
+  setFileService(deps.files);
   app.decorateRequest('user', null);
   app.addHook('preHandler', async (request) => {
     await loadUser(deps.db, request);
@@ -85,6 +90,7 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
   await app.register(routeChangeRoutes, { db: deps.db, routes: deps.routes });
   await app.register(disputeRoutes, { db: deps.db });
   await app.register(ratingRoutes, { db: deps.db });
+  await app.register(fileRoutes);
   await app.register(complaintRoutes, { db: deps.db });
   await app.register(adminPeopleRoutes, { db: deps.db, cityCode: deps.cityCode });
   await app.register(adminPricingRoutes, { db: deps.db, cityCode: deps.cityCode });

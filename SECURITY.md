@@ -24,7 +24,9 @@ every item below has a regression test in `apps/api/test/security.test.ts` or th
 - All SQL uses parameters; no string-built queries with user input.
 - Ids in URLs are validated before reaching the database.
 - Request bodies are capped at 64 KB.
-- Document uploads accept only links into our own storage (`FILE_BASE_URL`).
+- Document photos are checked by their first bytes (JPEG, PNG, WebP, HEIC only), max 8 MB, stored under
+  random names outside any public folder, and served only through 10-minute HMAC-signed links issued to
+  the driver and to staff. Served with `nosniff`, `Content-Security-Policy: default-src 'none'`.
 - Route distance and time are always computed on the server; clients cannot submit their own.
 - Quote coordinates are limited to Uzbekistan.
 
@@ -147,7 +149,7 @@ The API refuses to start in production if:
 
 - Real SMS provider adapter and its webhook signature checks.
 - Payme / Click / Uzum adapters (webhook auth, checkout, card tokens), fiscal operator, driver payouts, refunds.
-- File storage with signed upload URLs and image type checks.
+- Move file storage to S3-compatible storage in Uzbekistan with encryption at rest; strip photo metadata (EXIF/GPS).
 - Hosting in Uzbekistan, TLS, database backups and encryption at rest.
 - 2FA for staff accounts; staff panel only from allowed networks / VPN.
 - Penetration test before the public launch.
