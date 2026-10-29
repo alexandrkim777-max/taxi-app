@@ -10,8 +10,8 @@ test('SMS login: wrong code, cooldown, success, /me, logout', { skip }, async ()
 
   assert.equal((await app.inject({ method: 'POST', url: '/auth/request-code', payload: { phone: '12345' } })).statusCode, 400);
 
-  await app.inject({ method: 'POST', url: '/auth/request-code', payload: { phone } });
-  const again = await app.inject({ method: 'POST', url: '/auth/request-code', payload: { phone } });
+  await app.inject({ method: 'POST', url: '/auth/request-code', payload: { phone, language: 'uz' } });
+  const again = await app.inject({ method: 'POST', url: '/auth/request-code', payload: { phone, language: 'uz' } });
   assert.equal(again.statusCode, 429, 'resend is rate limited');
 
   const wrong = await app.inject({ method: 'POST', url: '/auth/verify', payload: { phone, code: '000000' === sms.last.get(phone) ? '111111' : '000000' } });

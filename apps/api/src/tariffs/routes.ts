@@ -4,6 +4,7 @@ import { clampToCorridor, fareTiyin, type Tariff } from '@taxi/shared';
 import { requireUser } from '../auth/session.ts';
 import type { RouteProvider } from '../routing/index.ts';
 import { uzPoint } from '../lib/geo.ts';
+import { langOf, pick } from '../lib/i18n.ts';
 import { bestOf, pickupMin, pricedDrivers } from '../dispatch/matching.ts';
 
 const TARIFF_CHANGE_COOLDOWN_HOURS = 24;
@@ -81,11 +82,12 @@ export async function tariffRoutes(app: FastifyInstance, { db, routes, cityCode 
     return row ? { driverId: row.driver_id, cls: row } : null;
   }
 
-  app.get('/classes', async () => {
+  app.get('/classes', async (request) => {
+    const lang = langOf(request);
     const classes = await cityClasses();
     return classes.map((c) => ({
       code: c.code,
-      name: c.name,
+      name: pick(c.name, lang),
       seats: c.seats,
       recommended: recommended(c),
       corridor: { minPct: c.corridor_min_pct, maxPct: c.corridor_max_pct },
@@ -212,7 +214,7 @@ export async function tariffRoutes(app: FastifyInstance, { db, routes, cityCode 
           });
           const best = bestOf(drivers);
           return {
-            code: c.code, name: c.name, seats: c.seats, maxFareTiyin: rec, minFareTiyin: floor,
+            code: c.code, name: pick(c.name, langOf(request)), seats: c.seats, maxFareTiyin: rec, minFareTiyin: floor,
             best: best ? { priceTiyin: best.priceTiyin, pickupMin: pickupMin(best.distanceM) } : null,
             driversNearby: drivers.length,
           };

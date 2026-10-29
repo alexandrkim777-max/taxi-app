@@ -117,7 +117,16 @@ export class PaymentService {
       );
     }
     if (p.type === 'ride' && p.ride_id) {
-      await tx.query(`UPDATE rides SET payment_status = $2 WHERE id = $1`, [p.ride_id, status === 'succeeded' ? 'paid' : 'failed']);
+      if (status === 'succeeded') {
+        await tx.query(
+          `UPDATE rides SET paid_tiyin = paid_tiyin + $2,
+                  payment_status = CASE WHEN paid_tiyin + $2 >= locked_price_tiyin THEN 'paid' ELSE 'pending' END
+            WHERE id = $1`,
+          [p.ride_id, p.amount_tiyin],
+        );
+      } else {
+        await tx.query(`UPDATE rides SET payment_status = 'failed' WHERE id = $1`, [p.ride_id]);
+      }
     }
     if (p.type === 'cancel_fee' && p.ride_id && status === 'succeeded') {
       await tx.query(`UPDATE rides SET cancel_fee_status = 'paid' WHERE id = $1 AND cancel_fee_status = 'pending'`, [p.ride_id]);
@@ -159,50 +168,100 @@ export class PaymentService {
    */
   async chargeSavedCard(opts: {
     type: 'ride' | 'cancel_fee'; rideId: string; userId: string; cardId: string; driverId: string | null;
-    amountTiyin: number; description: string;
+    amountTiyin: number; description: string; key?: string;
   }): Promise<'succeeded' | 'failed' | 'pending'> {
     const { provider, token } = await this.cardToken(this.db, opts.userId, opts.cardId);
-    const key = `${opts.type}:${opts.rideId}`;
-    const { rows } = await this.db.query<{ id: string; status: string }>(
-      `INSERT INTO payments (type, amount_tiyin, provider, status, ride_id, payer_user_id, driver_id, card_id, idempotency_key)
-       VALUES ($1, $2, $3, 'pending', $4, $5, $6, $7, $8)
-       ON CONFLICT (idempotency_key) WHERE idempotency_key IS NOT NULL
-         DO UPDATE SET updated_at = now()
-       RETURNING id, status`,
-      [opts.type, opts.amountTiyin, provider.name, opts.rideId, opts.userId, opts.driverId, opts.cardId, key],
-    );
-    const payment = rows[0]!;
-    if (payment.status === 'succeeded') return 'succeeded';
-    if (payment.status === 'failed') {
-      // A new attempt for the same debt: reopen it with a fresh provider reference.
-      await this.db.query(`UPDATE payments SET status = 'pending', provider_ref = NULL, card_id = $2 WHERE id = $1`, [payment.id, opts.cardId]);
-    }
-    let result;
+    const key = opts.key ?? `${opts.type}:${opts.rideId}`;
+    // One charge attempt per key at a time, across all API instances (e.g. the 60% prepayment and
+    // the completion charge racing each other): a second caller waits and then sees the result.
+    const lock = await this.db.connect();
     try {
-      result = await provider.chargeCard({ paymentId: payment.id, cardToken: token, amountTiyin: opts.amountTiyin, description: opts.description });
-    } catch (err) {
-      this.log.error({ err, paymentId: payment.id }, 'card charge error');
-      result = { status: 'failed' as const, reason: 'provider_error' };
+      await lock.query('SELECT pg_advisory_lock(hashtext($1))', [key]);
+      const { rows } = await this.db.query<{ id: string; status: string; provider_ref: string | null }>(
+        `INSERT INTO payments (type, amount_tiyin, provider, status, ride_id, payer_user_id, driver_id, card_id, idempotency_key)
+         VALUES ($1, $2, $3, 'pending', $4, $5, $6, $7, $8)
+         ON CONFLICT (idempotency_key) WHERE idempotency_key IS NOT NULL
+           DO UPDATE SET updated_at = now()
+         RETURNING id, status, provider_ref`,
+        [opts.type, opts.amountTiyin, provider.name, opts.rideId, opts.userId, opts.driverId, opts.cardId, key],
+      );
+      const payment = rows[0]!;
+      if (payment.status === 'succeeded') return 'succeeded';
+      // Already sent to the provider and waiting for its answer: never charge again.
+      if (payment.status === 'pending' && payment.provider_ref) return 'pending';
+      if (payment.status === 'failed') {
+        // A new attempt for the same debt (maybe with another card): reopen it with a fresh reference.
+        await this.db.query(
+          `UPDATE payments SET status = 'pending', provider_ref = NULL, card_id = $2, amount_tiyin = $3, provider = $4 WHERE id = $1`,
+          [payment.id, opts.cardId, opts.amountTiyin, provider.name],
+        );
+      }
+      let result;
+      try {
+        result = await provider.chargeCard({ paymentId: payment.id, cardToken: token, amountTiyin: opts.amountTiyin, description: opts.description });
+      } catch (err) {
+        this.log.error({ err, paymentId: payment.id }, 'card charge error');
+        result = { status: 'failed' as const, reason: 'provider_error' };
+      }
+      if (result.status === 'pending') {
+        await this.db.query(`UPDATE payments SET provider_ref = $2 WHERE id = $1`, [payment.id, result.providerRef]);
+        return 'pending';
+      }
+      await this.settle({
+        paymentId: payment.id,
+        providerRef: result.providerRef ?? `failed:${payment.id}:${Date.now()}`,
+        amountTiyin: opts.amountTiyin,
+        status: result.status,
+        reason: result.status === 'failed' ? result.reason : undefined,
+      });
+      return result.status;
+    } finally {
+      await lock.query('SELECT pg_advisory_unlock(hashtext($1))', [key]).catch(() => {});
+      lock.release();
     }
-    if (result.status === 'pending') {
-      await this.db.query(`UPDATE payments SET provider_ref = $2 WHERE id = $1`, [payment.id, result.providerRef]);
-      return 'pending';
-    }
-    await this.settle({
-      paymentId: payment.id,
-      providerRef: result.providerRef ?? `failed:${payment.id}:${Date.now()}`,
-      amountTiyin: opts.amountTiyin,
-      status: result.status,
-      reason: result.status === 'failed' ? result.reason : undefined,
-    });
-    return result.status;
   }
 
-  /** What the passenger still owes: failed card rides and unpaid cancellation fees. */
+  /**
+   * Charges what is still due for a card ride (the whole fare at 60% of the trip, or the rest after a
+   * route change) to the ride's card, or to another card the passenger picked. If the passenger
+   * already paid more than the final price (the route got shorter), a refund is recorded.
+   */
+  async chargeRideBalance(rideId: string, cardId?: string): Promise<'succeeded' | 'failed' | 'pending' | 'nothing_due'> {
+    const { rows } = await this.db.query<{ passenger_id: string; card_id: string | null; driver_id: string; due: string; paid: string }>(
+      `SELECT passenger_id, card_id, driver_id, locked_price_tiyin - paid_tiyin AS due, paid_tiyin AS paid
+         FROM rides WHERE id = $1 AND payment_method = 'card'`,
+      [rideId],
+    );
+    const r = rows[0];
+    if (!r) return 'nothing_due';
+    const due = Number(r.due);
+    if (due < 0) {
+      // TODO(refunds): send to the provider once refunds are implemented.
+      await this.db.query(
+        `INSERT INTO payments (type, amount_tiyin, provider, status, ride_id, payer_user_id, idempotency_key)
+         SELECT 'refund', $2, coalesce(c.provider, 'manual'), 'pending', $1, $3, 'refund:' || $1
+           FROM rides ri LEFT JOIN payment_cards c ON c.id = ri.card_id WHERE ri.id = $1
+         ON CONFLICT (idempotency_key) WHERE idempotency_key IS NOT NULL DO NOTHING`,
+        [rideId, -due, r.passenger_id],
+      );
+      await this.db.query(`UPDATE rides SET payment_status = 'paid' WHERE id = $1`, [rideId]);
+      return 'nothing_due';
+    }
+    if (due === 0) return 'nothing_due';
+    const card = cardId ?? r.card_id;
+    if (!card) return 'failed';
+    return this.chargeSavedCard({
+      type: 'ride', rideId, userId: r.passenger_id, cardId: card, driverId: r.driver_id, amountTiyin: due,
+      description: 'Ride', key: Number(r.paid) > 0 ? `ride_extra:${rideId}` : `ride:${rideId}`,
+    });
+  }
+
+  /** What the passenger still owes: unpaid card rides (after completion) and cancellation fees. */
   async debts(q: Q, userId: string) {
     const { rows } = await q.query<{ rideId: string; kind: 'ride' | 'cancel_fee'; amountTiyin: number; driverId: string | null }>(
-      `SELECT id AS "rideId", 'ride' AS kind, locked_price_tiyin::int AS "amountTiyin", driver_id AS "driverId"
+      `SELECT id AS "rideId", 'ride' AS kind, (locked_price_tiyin - paid_tiyin)::int AS "amountTiyin", driver_id AS "driverId"
          FROM rides WHERE passenger_id = $1 AND payment_method = 'card' AND payment_status = 'failed'
+          AND status = 'completed' AND locked_price_tiyin > paid_tiyin
        UNION ALL
        SELECT id, 'cancel_fee', cancel_fee_tiyin::int, driver_id
          FROM rides WHERE passenger_id = $1 AND cancel_fee_status = 'pending'`,

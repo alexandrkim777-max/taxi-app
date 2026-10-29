@@ -41,10 +41,10 @@ Tests: `npm test` (the API integration tests need a migrated database at `DATABA
 
 | Method | Path | Who | What |
 | --- | --- | --- | --- |
-| POST | `/auth/request-code` | anyone | Sends a 6-digit SMS code; one per phone per 60 s, valid 5 min |
+| POST | `/auth/request-code` | anyone | Language (uz / ru / en, chosen on the first screen) + phone; sends a 6-digit SMS code; one per phone per 60 s, valid 5 min |
 | POST | `/auth/verify` | anyone | Checks the code (max 5 attempts), returns a bearer token (90 days) |
 | POST | `/auth/logout` | user | Revokes the current token |
-| GET | `/me` | user | Current user |
+| GET / PATCH | `/me` | user | Current user; change language or name |
 | POST | `/drivers/apply` | user | Becomes a driver (status `pending`) |
 | GET | `/drivers/me` | driver | Profile, vehicles, documents, missing document types |
 | POST | `/drivers/me/vehicles` | driver | Adds a car; the class is set by a moderator |
@@ -67,6 +67,7 @@ Tests: `npm test` (the API integration tests need a migrated database at `DATABA
 | POST | `/rides/:id/accept` | chosen driver | Accepts; the offer price is locked into the ride |
 | POST | `/rides/:id/decline` | chosen driver | Declines; one-tap rides go straight to the next driver |
 | POST | `/rides/:id/status` | assigned driver | `driver_en_route` → `arrived` → `in_progress` → `completed` |
+| POST | `/rides/:id/payment` | passenger | Switch to cash or another card (e.g. after a decline at 60% of the trip) |
 | GET | `/rides/:id/cancel-terms` | participants | What cancelling now costs, with breakdown (fee + waiting) |
 | POST | `/rides/:id/cancel` | passenger or driver | Before the trip starts; the passenger confirms any fee (`acceptFeeTiyin`), the driver may cancel as `noShow` after 5 min |
 | GET | `/rating-tags?about=driver` | anyone | Tags for the end-of-ride screen (clean car, careful driving, …) in uz / ru / en |
@@ -128,7 +129,9 @@ development uses the `fake` provider (test page at `/dev/payments/:id`; card tok
 `fake_tok_decline_*` for a declined card).
 
 - Driver subscriptions: hosted checkout; the paid period starts when the current one ends.
-- Rides: cash (straight to the driver) or a saved card, charged on completion.
+- Rides: cash (straight to the driver) or a saved card, charged at **60% of the trip** (by distance driven,
+  from GPS pings, or by time). On a decline the app asks to pay cash or pick another card; the driver
+  sees the amount to collect. Whatever is still due (e.g. a stop added later) is charged at the end.
 - Cancellation fees: charged to the ride's card at once; on cash rides they become a debt.
 - Debts (declined card, unpaid fee) must be settled before the next order.
 - Fiscal receipts for subscriptions behind `payments/fiscal.ts` (stub until the OFD operator is connected).
@@ -151,7 +154,8 @@ development uses the `fake` provider (test page at `/dev/payments/:id`; card tok
 - Ride status changes only through allowed transitions; every change is written to `ride_events`.
 - Money is stored as integer tiyin (`bigint`), never as floats.
 - Time is stored in UTC (`timestamptz`), shown in the user's time zone.
-- All user-facing strings go through i18n (uz, ru, en) from day one.
+- All user-facing strings go through i18n (uz, ru, en) from day one. The user picks the language on the
+  first screen; the API answers labels in that language (else `?lang=`, `Accept-Language`, Uzbek).
 - A city is a first-class entity: a new city is configuration, not code.
 - The map provider sits behind an adapter; the default is self-hosted OpenStreetMap.
 - Personal data must be hosted in Uzbekistan in production; development uses test data only.

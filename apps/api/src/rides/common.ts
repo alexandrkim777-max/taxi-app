@@ -105,6 +105,7 @@ export async function rideView(q: Q, rideId: string, role: Role) {
             r.cancel_reason AS "cancelReason", r.cancel_fee_tiyin::int AS "cancelFeeTiyin",
             r.cancel_fee_status AS "cancelFeeStatus", r.created_at AS "createdAt",
             r.payment_method AS "paymentMethod", r.payment_status AS "paymentStatus",
+            r.paid_tiyin::int AS "paidTiyin", r.trip_distance_m AS "tripDistanceM",
             r.driver_id, pu.name AS "passengerName",
             du.name AS "driverName", CASE WHEN d.rating_count >= 5 THEN d.rating::float END AS "driverRating",
             CASE WHEN pu.rating_count >= 5 THEN pu.rating::float END AS "passengerRating",
@@ -135,7 +136,14 @@ export async function rideView(q: Q, rideId: string, role: Role) {
     stops: stops.rows, options: r.options, comment: r.comment,
     cancelledBy: r.cancelledBy, cancelReason: r.cancelReason,
     cancelFee: r.cancelFeeTiyin ? { amountTiyin: r.cancelFeeTiyin, status: r.cancelFeeStatus } : null,
-    payment: { method: r.paymentMethod, status: r.paymentStatus },
+    payment: {
+      method: r.paymentMethod,
+      status: r.paymentStatus,
+      paidTiyin: r.paidTiyin,
+      dueTiyin: r.priceTiyin === null ? null : Math.max(0, r.priceTiyin - r.paidTiyin),
+      // Card declined during the trip: the app asks "pay cash or add another card".
+      actionRequired: r.paymentStatus === 'failed' && ['accepted', 'driver_en_route', 'arrived', 'in_progress'].includes(r.status),
+    },
     createdAt: r.createdAt,
   };
   if (r.status === 'created' && role === 'passenger') {
@@ -161,7 +169,14 @@ export async function rideView(q: Q, rideId: string, role: Role) {
         : null,
     };
   }
-  if (role === 'driver') view.passenger = { name: r.passengerName, rating: r.passengerRating };
+  if (role === 'driver') {
+    view.passenger = { name: r.passengerName, rating: r.passengerRating };
+    // What the driver collects in cash at the end (also after a switch from a declined card).
+    view.cashToCollectTiyin = r.paymentMethod === 'cash' && r.priceTiyin !== null ? Math.max(0, r.priceTiyin - r.paidTiyin) : 0;
+  }
+  if (r.status === 'in_progress' && r.distanceM) {
+    view.trip = { drivenM: r.tripDistanceM, progressPct: Math.min(100, Math.round((100 * r.tripDistanceM) / r.distanceM)) };
+  }
   // End-of-ride screen: has this side rated yet?
   if (r.status === 'completed') {
     const mine = await q.query<{ score: number }>(

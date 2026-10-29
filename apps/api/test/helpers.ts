@@ -31,14 +31,20 @@ export function randomPhone(): string {
   return `+99890${String(Math.floor(Math.random() * 10_000_000)).padStart(7, '0')}`;
 }
 
-export async function setup(opts: { rateLimit?: boolean } = {}) {
-  const sms = new CapturingSms();
-  const payments = new PaymentService({
+let service: PaymentService | null = null;
+/** The payment service the test apps use (fake provider). */
+export function payments(): PaymentService {
+  service ??= new PaymentService({
     db, providers: new Map([['fake', fakeProvider]]), tokenKey: DEV_TOKEN_KEY, fiscal: new FakeFiscalProvider(),
     log: { warn() {}, error() {} },
   });
+  return service;
+}
+
+export async function setup(opts: { rateLimit?: boolean } = {}) {
+  const sms = new CapturingSms();
   const app = await buildApp({
-    db, sms, payments, devRoutes: true, authSecret: 'test-secret', routes: new EstimateRouteProvider(),
+    db, sms, payments: payments(), devRoutes: true, authSecret: 'test-secret', routes: new EstimateRouteProvider(),
     fileBaseUrl: 'https://files.example/', cityCode: 'tashkent', rateLimit: opts.rateLimit ?? false,
   });
   async function login(phone: string): Promise<string> {

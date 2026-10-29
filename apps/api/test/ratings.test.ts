@@ -113,9 +113,9 @@ async function rateTags(s: Setup, auth: Headers, rideId: string, score: number, 
 
 test('end of ride: "what did you like" tags, shown as driver highlights', { skip }, async () => {
   const s = await setup();
-  const tags = (await s.app.inject({ method: 'GET', url: '/rating-tags?about=driver' })).json();
+  const tags = (await s.app.inject({ method: 'GET', url: '/rating-tags?about=driver&lang=ru' })).json();
   const clean = tags.positive.find((t: { code: string }) => t.code === 'clean_car');
-  assert.equal(clean.label.ru, 'Чисто в салоне');
+  assert.equal(clean.label, 'Чисто в салоне');
   assert.ok(tags.negative.some((t: { code: string }) => t.code === 'unsafe_driving'));
 
   const r = await completedRide(s);

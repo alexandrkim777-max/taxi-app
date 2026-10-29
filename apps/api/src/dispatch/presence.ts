@@ -62,16 +62,27 @@ export async function goOnline(q: Q, ctx: DriverContext, pos: Position): Promise
 }
 
 /**
- * Position ping. One query: only a verified driver who is already on the line can move
- * their marker. Returns null when the driver is not online.
+ * Position ping. Only a verified driver who is already on the line can move their marker.
+ * During a trip the distance since the last ping is added to the ride's odometer (jumps over
+ * 500 m between pings are GPS glitches and are capped). Returns null when not online.
  */
 export async function updatePosition(q: Q, userId: string, pos: Position): Promise<string | null> {
   const { rows } = await q.query<{ status: string }>(
-    `UPDATE driver_presence p
-        SET point = ST_SetSRID(ST_MakePoint($3, $2), 4326)::geography, heading = $4, updated_at = now()
-       FROM drivers d
-      WHERE d.id = p.driver_id AND d.user_id = $1 AND d.status = 'verified' AND d.deleted_at IS NULL
-      RETURNING p.status`,
+    `WITH prev AS (
+       SELECT p.driver_id, p.point FROM driver_presence p
+         JOIN drivers d ON d.id = p.driver_id
+        WHERE d.user_id = $1 AND d.status = 'verified' AND d.deleted_at IS NULL
+     ), moved AS (
+       UPDATE driver_presence p
+          SET point = ST_SetSRID(ST_MakePoint($3, $2), 4326)::geography, heading = $4, updated_at = now()
+         FROM prev WHERE p.driver_id = prev.driver_id
+       RETURNING p.driver_id, p.status, prev.point AS old_point, p.point AS new_point
+     ), odometer AS (
+       UPDATE rides r SET trip_distance_m = r.trip_distance_m + LEAST(ST_Distance(moved.old_point, moved.new_point), 500)::int
+         FROM moved WHERE r.driver_id = moved.driver_id AND r.status = 'in_progress'
+       RETURNING r.id
+     )
+     SELECT status FROM moved`,
     [userId, pos.lat, pos.lng, pos.heading ?? null],
   );
   return rows[0]?.status ?? null;

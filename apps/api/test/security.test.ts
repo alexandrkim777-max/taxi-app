@@ -8,7 +8,7 @@ test('per-IP limit on login code requests', { skip }, async () => {
   const { app } = await setup({ rateLimit: true });
   const codes: number[] = [];
   for (let i = 0; i < 6; i++) {
-    const res = await app.inject({ method: 'POST', url: '/auth/request-code', payload: { phone: randomPhone() } });
+    const res = await app.inject({ method: 'POST', url: '/auth/request-code', payload: { phone: randomPhone(), language: 'uz' } });
     codes.push(res.statusCode);
   }
   assert.deepEqual(codes.slice(0, 5), [204, 204, 204, 204, 204]);
@@ -19,7 +19,7 @@ test('per-IP limit on login code requests', { skip }, async () => {
 test('parallel guesses cannot exceed 5 attempts per code', { skip }, async () => {
   const { app, sms } = await setup();
   const phone = randomPhone();
-  await app.inject({ method: 'POST', url: '/auth/request-code', payload: { phone } });
+  await app.inject({ method: 'POST', url: '/auth/request-code', payload: { phone, language: 'uz' } });
   const real = sms.last.get(phone)!;
   const wrong = real === '000000' ? '000001' : '000000';
 
@@ -44,7 +44,7 @@ test('per-phone hourly cap on codes', { skip }, async () => {
      SELECT $1, 'x', now(), now() - interval '10 minutes' FROM generate_series(1, 5)`,
     [phone],
   );
-  const res = await app.inject({ method: 'POST', url: '/auth/request-code', payload: { phone } });
+  const res = await app.inject({ method: 'POST', url: '/auth/request-code', payload: { phone, language: 'uz' } });
   assert.equal(res.statusCode, 429);
   assert.equal(res.json().error, 'too_many_codes');
   await app.close();
@@ -53,7 +53,7 @@ test('per-phone hourly cap on codes', { skip }, async () => {
 test('a code works only once', { skip }, async () => {
   const { app, sms } = await setup();
   const phone = randomPhone();
-  await app.inject({ method: 'POST', url: '/auth/request-code', payload: { phone } });
+  await app.inject({ method: 'POST', url: '/auth/request-code', payload: { phone, language: 'uz' } });
   const code = sms.last.get(phone);
   const [a, b] = await Promise.all([
     app.inject({ method: 'POST', url: '/auth/verify', payload: { phone, code } }),

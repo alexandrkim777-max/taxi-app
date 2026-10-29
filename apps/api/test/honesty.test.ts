@@ -115,7 +115,8 @@ test('route changes are capped per ride', { skip }, async () => {
     const p = await preview(s, pax, rideId, stops);
     if (i <= 5) {
       assert.equal(p.statusCode, 200, p.body);
-      assert.equal((await confirm(s, pax, rideId, stops, p.json().newPriceTiyin)).statusCode, 200);
+      const c = await confirm(s, pax, rideId, stops, p.json().newPriceTiyin);
+      assert.equal(c.statusCode, 200, c.body);
     } else {
       assert.equal(p.statusCode, 429);
     }

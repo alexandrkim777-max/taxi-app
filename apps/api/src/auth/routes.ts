@@ -26,14 +26,17 @@ interface Deps {
 }
 
 export async function authRoutes(app: FastifyInstance, { db, sms, authSecret }: Deps): Promise<void> {
-  app.post<{ Body: { phone: string; language?: 'uz' | 'ru' | 'en' } }>(
+  // The app's first screen is the language choice (uz / ru / en); it is sent with the login
+  // request and becomes the user's language for SMS, labels and notifications.
+  app.post<{ Body: { phone: string; language: 'uz' | 'ru' | 'en' } }>(
     '/auth/request-code',
     {
       config: AUTH_IP_LIMIT,
       schema: {
         body: {
           type: 'object',
-          required: ['phone'],
+          required: ['phone', 'language'],
+          additionalProperties: false,
           properties: {
             phone: { type: 'string', maxLength: 32 },
             language: { type: 'string', enum: ['uz', 'ru', 'en'] },
@@ -62,17 +65,17 @@ export async function authRoutes(app: FastifyInstance, { db, sms, authSecret }: 
 
       const code = generateCode();
       await db.query(
-        `INSERT INTO auth_codes (phone, code_hash, expires_at)
-         VALUES ($1, $2, now() + make_interval(mins => $3))`,
-        [phone, hashCode(authSecret, phone, code), CODE_TTL_MIN],
+        `INSERT INTO auth_codes (phone, code_hash, expires_at, language)
+         VALUES ($1, $2, now() + make_interval(mins => $3), $4)`,
+        [phone, hashCode(authSecret, phone, code), CODE_TTL_MIN, request.body.language],
       );
-      const text = (SMS_TEXT[request.body.language ?? 'uz'] ?? SMS_TEXT.uz)(code);
+      const text = (SMS_TEXT[request.body.language] ?? SMS_TEXT.uz)(code);
       await sms.send(phone, text);
       return reply.code(204).send();
     },
   );
 
-  app.post<{ Body: { phone: string; code: string; language?: 'uz' | 'ru' | 'en' } }>(
+  app.post<{ Body: { phone: string; code: string } }>(
     '/auth/verify',
     {
       config: AUTH_IP_LIMIT,
@@ -80,10 +83,10 @@ export async function authRoutes(app: FastifyInstance, { db, sms, authSecret }: 
         body: {
           type: 'object',
           required: ['phone', 'code'],
+          additionalProperties: false,
           properties: {
             phone: { type: 'string', maxLength: 32 },
             code: { type: 'string', pattern: '^[0-9]{6}$' },
-            language: { type: 'string', enum: ['uz', 'ru', 'en'] },
           },
         },
       },
@@ -94,13 +97,13 @@ export async function authRoutes(app: FastifyInstance, { db, sms, authSecret }: 
 
       // Count the attempt atomically BEFORE comparing, so parallel requests
       // cannot get more than MAX_ATTEMPTS guesses at one code.
-      const { rows } = await db.query<{ id: string; code_hash: string }>(
+      const { rows } = await db.query<{ id: string; code_hash: string; language: string }>(
         `UPDATE auth_codes SET attempts = attempts + 1
           WHERE id = (SELECT id FROM auth_codes
                        WHERE phone = $1 AND consumed_at IS NULL AND expires_at > now()
                        ORDER BY created_at DESC LIMIT 1)
             AND attempts < $2
-          RETURNING id, code_hash`,
+          RETURNING id, code_hash, language`,
         [phone, MAX_ATTEMPTS],
       );
       const entry = rows[0];
@@ -117,10 +120,11 @@ export async function authRoutes(app: FastifyInstance, { db, sms, authSecret }: 
       );
       if (!consumed.rowCount) return reply.code(400).send({ error: 'code_invalid_or_expired' });
       const user = await db.query<{ id: string; phone: string; roles: string[]; language: string; name: string | null }>(
+        // The language picked on the login screen wins, also for returning users.
         `INSERT INTO users (phone, language) VALUES ($1, $2)
-         ON CONFLICT (phone) DO UPDATE SET phone = EXCLUDED.phone
+         ON CONFLICT (phone) DO UPDATE SET language = EXCLUDED.language
          RETURNING id, phone, roles, language, name`,
-        [phone, request.body.language ?? 'uz'],
+        [phone, entry.language],
       );
 
       const token = generateToken();
@@ -138,6 +142,31 @@ export async function authRoutes(app: FastifyInstance, { db, sms, authSecret }: 
     await db.query('UPDATE sessions SET revoked_at = now() WHERE token_hash = $1', [hashToken(token)]);
     return reply.code(204).send();
   });
+
+  // Change language or name later, from the profile screen.
+  app.patch<{ Body: { language?: 'uz' | 'ru' | 'en'; name?: string } }>(
+    '/me',
+    {
+      preHandler: requireUser,
+      schema: {
+        body: {
+          type: 'object', additionalProperties: false, minProperties: 1,
+          properties: {
+            language: { type: 'string', enum: ['uz', 'ru', 'en'] },
+            name: { type: 'string', minLength: 1, maxLength: 80 },
+          },
+        },
+      },
+    },
+    async (request) => {
+      const { rows } = await db.query(
+        `UPDATE users SET language = coalesce($2, language), name = coalesce($3, name) WHERE id = $1
+         RETURNING id, phone, name, gender, language, roles`,
+        [request.user!.id, request.body.language ?? null, request.body.name?.trim() || null],
+      );
+      return rows[0];
+    },
+  );
 
   app.get('/me', { preHandler: requireUser }, async (request) => {
     const { rows } = await db.query(

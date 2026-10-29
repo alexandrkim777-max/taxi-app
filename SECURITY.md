@@ -96,7 +96,10 @@ every item below has a regression test in `apps/api/test/security.test.ts` or th
 - Prices come only from our tables (plans, locked ride price, fees), never from the client.
 - A payment leaves `pending` exactly once, under a row lock; a success is accepted only for the exact
   amount; repeated webhooks are acknowledged without effect; provider references are unique.
-- Card charges use idempotency keys (`ride:<id>`, `cancel_fee:<id>`), so retries never charge twice.
+- Card charges use idempotency keys (`ride:<id>`, `ride_extra:<id>`, `cancel_fee:<id>`) and a per-key
+  database lock, so retries, the 60% prepayment and the completion charge can never charge twice.
+- The trip odometer is server-side, from position pings (jumps over 500 m per ping are capped).
+- Only the passenger can switch a ride's payment, only to their own card, never while a charge is in flight.
 - Webhooks: the adapter verifies authenticity before reading anything; optional per-provider IP allowlists;
   every call is logged, but unverified bodies are not stored. Stub adapters refuse all webhooks.
 - Cards are owner-only; a card in use by an active ride cannot be removed; at most 5 cards per user.

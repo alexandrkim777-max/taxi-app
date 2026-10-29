@@ -8,6 +8,7 @@ import { createPaymentProviders } from './payments/providers/index.ts';
 import { PaymentService } from './payments/service.ts';
 import { FakeFiscalProvider } from './payments/fiscal.ts';
 import { DEV_TOKEN_KEY } from './payments/crypto.ts';
+import { prepayTick } from './payments/prepay.ts';
 
 const payments = new PaymentService({
   db: pool,
@@ -32,15 +33,15 @@ const app = await buildApp({
   logger: true,
 });
 
-// Dispatcher: every 2 s moves auto-mode rides on (next driver after a timeout, new drivers,
-// giving up after the search window). Overlapping runs are skipped; several instances are safe.
+// Background loop every 2 s: dispatcher (next driver after a timeout, new drivers, giving up after
+// the search window) and card prepayment at 60% of the trip. Overlapping runs are skipped; several instances are safe.
 const DISPATCH_TICK_MS = 2000;
 let ticking = false;
 const ticker = setInterval(() => {
   if (ticking) return;
   ticking = true;
-  dispatchTick(pool)
-    .catch((err) => app.log.error(err, 'dispatch tick failed'))
+  Promise.all([dispatchTick(pool), prepayTick(pool, payments)])
+    .catch((err) => app.log.error(err, 'background tick failed'))
     .finally(() => { ticking = false; });
 }, DISPATCH_TICK_MS);
 app.addHook('onClose', async () => clearInterval(ticker));

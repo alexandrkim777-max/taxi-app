@@ -7,6 +7,8 @@ import { db, fakeProvider, randomPhone, setup, skip, verifiedDriver, type Setup 
 import { drive, north, offerOf, onlineDriver, passenger, randomSpot, type Headers } from './rideHelpers.ts';
 import { PaymeProvider } from '../src/payments/providers/payme.ts';
 import { createPaymentProviders } from '../src/payments/providers/index.ts';
+import { prepayTick } from '../src/payments/prepay.ts';
+import { payments as servicePayments } from './helpers.ts';
 
 async function webhook(s: Setup, body: unknown, signature = fakeProvider.sign(body)) {
   return s.app.inject({ method: 'POST', url: '/payments/webhooks/fake', payload: body as object, headers: { 'x-fake-signature': signature } });
@@ -143,7 +145,9 @@ test('card ride: charged on completion for the final price', { skip }, async () 
   await drive(s, r.driver, r.rideId, ['driver_en_route', 'arrived', 'in_progress', 'completed']);
 
   const view = (await s.app.inject({ method: 'GET', url: `/rides/${r.rideId}`, headers: pax })).json();
-  assert.deepEqual(view.payment, { method: 'card', status: 'paid' });
+  assert.equal(view.payment.method, 'card');
+  assert.equal(view.payment.status, 'paid');
+  assert.equal(view.payment.dueTiyin, 0);
   const pay = await db.query(`SELECT amount_tiyin::int AS a, status FROM payments WHERE ride_id = $1 AND type = 'ride'`, [r.rideId]);
   assert.deepEqual(pay.rows, [{ a: view.priceTiyin, status: 'succeeded' }]);
   await s.app.close();
@@ -203,5 +207,137 @@ test('real providers stay locked until implemented', { skip }, async () => {
   const res = await s.app.inject({ method: 'POST', url: '/payments/webhooks/payme', payload: { method: 'PerformTransaction' } });
   assert.equal(res.statusCode, 404);
   assert.ok(randomPhone());
+  await s.app.close();
+});
+
+// ---------------------------------------------------------------------------
+// Card charged at 60% of the trip
+
+
+async function inTrip(s: Setup, pax: Headers, cardId: string) {
+  const r = await cardRide(s, pax, cardId);
+  await drive(s, r.driver, r.rideId, ['driver_en_route', 'arrived', 'in_progress']);
+  return r;
+}
+
+async function rideOf(s: Setup, auth: Headers, rideId: string) {
+  return (await s.app.inject({ method: 'GET', url: `/rides/${rideId}`, headers: auth })).json();
+}
+
+test('the odometer counts the trip from GPS pings, ignoring jumps', { skip }, async () => {
+  const s = await setup();
+  const pax = await passenger(s);
+  const card = (await addCard(s, pax, `fake_tok_${Math.random().toString(36).slice(2)}`)).json();
+  const r = await inTrip(s, pax, card.id);
+  for (const m of [300, 600, 5600]) {
+    await s.app.inject({ method: 'POST', url: '/drivers/me/location', headers: r.driver, payload: north(r.spot, m) });
+  }
+  const view = await rideOf(s, r.driver, r.rideId);
+  assert.ok(view.trip.drivenM >= 1090 && view.trip.drivenM <= 1110, `300 + 300 + capped 500, got ${view.trip.drivenM}`);
+  await s.app.close();
+});
+
+test('card is charged at 60% of the trip, not before', { skip }, async () => {
+  const s = await setup();
+  const pax = await passenger(s);
+  const card = (await addCard(s, pax, `fake_tok_${Math.random().toString(36).slice(2)}`)).json();
+  const r = await inTrip(s, pax, card.id);
+
+  await db.query(`UPDATE rides SET trip_distance_m = (route_distance_m * 0.5)::int WHERE id = $1`, [r.rideId]);
+  await prepayTick(db, servicePayments());
+  assert.equal((await rideOf(s, pax, r.rideId)).payment.status, null, 'not at 50%');
+
+  await db.query(`UPDATE rides SET trip_distance_m = (route_distance_m * 0.61)::int WHERE id = $1`, [r.rideId]);
+  await prepayTick(db, servicePayments());
+  const view = await rideOf(s, pax, r.rideId);
+  assert.equal(view.payment.status, 'paid');
+  assert.equal(view.payment.paidTiyin, view.priceTiyin);
+
+  // Completion charges nothing more.
+  await drive(s, r.driver, r.rideId, ['completed']);
+  const pays = await db.query(`SELECT count(*)::int AS n FROM payments WHERE ride_id = $1 AND type = 'ride'`, [r.rideId]);
+  assert.equal(pays.rows[0].n, 1);
+  await s.app.close();
+});
+
+test('time also counts: 60% of the expected trip time', { skip }, async () => {
+  const s = await setup();
+  const pax = await passenger(s);
+  const card = (await addCard(s, pax, `fake_tok_${Math.random().toString(36).slice(2)}`)).json();
+  const r = await inTrip(s, pax, card.id);
+  await db.query(
+    `UPDATE ride_events SET at = now() - make_interval(secs => (SELECT route_duration_s * 0.7 FROM rides WHERE id = $1))
+      WHERE ride_id = $1 AND type = 'status:in_progress'`,
+    [r.rideId],
+  );
+  await prepayTick(db, servicePayments());
+  assert.equal((await rideOf(s, pax, r.rideId)).payment.status, 'paid');
+  await s.app.close();
+});
+
+test('declined at 60%: the passenger switches to cash, the driver sees what to collect', { skip }, async () => {
+  const s = await setup();
+  const pax = await passenger(s);
+  const bad = (await addCard(s, pax, `fake_tok_decline_${Math.random().toString(36).slice(2)}`)).json();
+  const r = await inTrip(s, pax, bad.id);
+  await db.query(`UPDATE rides SET trip_distance_m = route_distance_m WHERE id = $1`, [r.rideId]);
+  await prepayTick(db, servicePayments());
+
+  const view = await rideOf(s, pax, r.rideId);
+  assert.equal(view.payment.status, 'failed');
+  assert.equal(view.payment.actionRequired, true, 'the app asks: cash or another card');
+
+  // Only the passenger decides.
+  assert.equal((await s.app.inject({ method: 'POST', url: `/rides/${r.rideId}/payment`, headers: r.driver, payload: { method: 'cash' } })).statusCode, 404);
+  const cash = await s.app.inject({ method: 'POST', url: `/rides/${r.rideId}/payment`, headers: pax, payload: { method: 'cash' } });
+  assert.equal(cash.statusCode, 200, cash.body);
+  const dv = await rideOf(s, r.driver, r.rideId);
+  assert.equal(dv.payment.method, 'cash');
+  assert.equal(dv.cashToCollectTiyin, dv.priceTiyin);
+
+  await drive(s, r.driver, r.rideId, ['completed']);
+  assert.equal((await s.app.inject({ method: 'GET', url: '/me/debts', headers: pax })).json().totalTiyin, 0, 'no debt: paid in cash');
+  await s.app.close();
+});
+
+test('declined at 60%: another card is charged at once', { skip }, async () => {
+  const s = await setup();
+  const pax = await passenger(s);
+  const bad = (await addCard(s, pax, `fake_tok_decline_${Math.random().toString(36).slice(2)}`)).json();
+  const good = (await addCard(s, pax, `fake_tok_${Math.random().toString(36).slice(2)}`)).json();
+  const r = await inTrip(s, pax, bad.id);
+  await db.query(`UPDATE rides SET trip_distance_m = route_distance_m WHERE id = $1`, [r.rideId]);
+  await prepayTick(db, servicePayments());
+
+  const other = await passenger(s);
+  const otherCard = (await addCard(s, other, `fake_tok_${Math.random().toString(36).slice(2)}`)).json();
+  assert.equal((await s.app.inject({ method: 'POST', url: `/rides/${r.rideId}/payment`, headers: pax, payload: { method: 'card', cardId: otherCard.id } })).statusCode, 404, 'not someone else\'s card');
+
+  const switched = await s.app.inject({ method: 'POST', url: `/rides/${r.rideId}/payment`, headers: pax, payload: { method: 'card', cardId: good.id } });
+  assert.equal(switched.statusCode, 200, switched.body);
+  assert.equal(switched.json().payment.status, 'paid');
+  assert.equal((await s.app.inject({ method: 'POST', url: `/rides/${r.rideId}/payment`, headers: pax, payload: { method: 'cash' } })).statusCode, 409, 'already paid');
+  await s.app.close();
+});
+
+test('route change after the 60% charge: the difference is charged at the end', { skip }, async () => {
+  const s = await setup();
+  const pax = await passenger(s);
+  const card = (await addCard(s, pax, `fake_tok_${Math.random().toString(36).slice(2)}`)).json();
+  const r = await inTrip(s, pax, card.id);
+  await db.query(`UPDATE rides SET trip_distance_m = route_distance_m WHERE id = $1`, [r.rideId]);
+  await prepayTick(db, servicePayments());
+  const paid = (await rideOf(s, pax, r.rideId)).payment.paidTiyin;
+
+  const longer = [r.spot, north(r.spot, 9000)];
+  const p = (await s.app.inject({ method: 'POST', url: `/rides/${r.rideId}/route/preview`, headers: pax, payload: { stops: longer } })).json();
+  await s.app.inject({ method: 'POST', url: `/rides/${r.rideId}/route`, headers: pax, payload: { stops: longer, priceTiyin: p.newPriceTiyin } });
+  await drive(s, r.driver, r.rideId, ['completed']);
+
+  const view = await rideOf(s, pax, r.rideId);
+  assert.equal(view.payment.status, 'paid');
+  assert.equal(view.payment.paidTiyin, p.newPriceTiyin);
+  const pays = await db.query(`SELECT amount_tiyin::int AS a FROM payments WHERE ride_id = $1 AND type = 'ride' ORDER BY created_at`, [r.rideId]);
+  assert.deepEqual(pays.rows.map((x) => x.a), [paid, p.newPriceTiyin - paid]);
   await s.app.close();
 });

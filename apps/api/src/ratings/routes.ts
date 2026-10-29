@@ -12,6 +12,7 @@ import type { FastifyInstance } from 'fastify';
 import type pg from 'pg';
 import { requireUser } from '../auth/session.ts';
 import { uuidParams } from '../lib/geo.ts';
+import { langOf, pick } from '../lib/i18n.ts';
 import { HttpError, isUniqueViolation, withTx } from '../lib/tx.ts';
 import { logEvent } from '../dispatch/matching.ts';
 import { rideFor, type Q } from '../rides/common.ts';
@@ -65,23 +66,26 @@ function shown(rating: string | null, count: number) {
 }
 
 export async function ratingRoutes(app: FastifyInstance, { db }: Deps): Promise<void> {
-  app.get<{ Querystring: { about?: TagSide } }>(
+  app.get<{ Querystring: { about?: TagSide; lang?: string } }>(
     '/rating-tags',
     {
       schema: {
         querystring: {
           type: 'object', additionalProperties: false,
-          properties: { about: { type: 'string', enum: ['driver', 'passenger'] } },
+          properties: {
+            about: { type: 'string', enum: ['driver', 'passenger'] },
+            lang: { type: 'string', enum: ['uz', 'ru', 'en'] },
+          },
         },
       },
     },
     async (request) => {
       const about = request.query.about ?? 'driver';
-      return {
-        maxTags: MAX_TAGS_PER_RATING,
-        positive: RATING_TAGS.filter((t) => t.about === about && t.tone === 'positive').map(({ code, label }) => ({ code, label })),
-        negative: RATING_TAGS.filter((t) => t.about === about && t.tone === 'negative').map(({ code, label }) => ({ code, label })),
-      };
+      const lang = langOf(request);
+      const list = (tone: 'positive' | 'negative') => RATING_TAGS
+        .filter((t) => t.about === about && t.tone === tone)
+        .map(({ code, label }) => ({ code, label: pick(label, lang) }));
+      return { language: lang, maxTags: MAX_TAGS_PER_RATING, positive: list('positive'), negative: list('negative') };
     },
   );
 

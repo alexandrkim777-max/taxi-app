@@ -3,6 +3,7 @@
 import type { FastifyInstance } from 'fastify';
 import { requireUser } from '../auth/session.ts';
 import { uuidParams } from '../lib/geo.ts';
+import { langOf, pick } from '../lib/i18n.ts';
 import { HttpError, isUniqueViolation } from '../lib/tx.ts';
 import { tokenHash } from './crypto.ts';
 import type { PaymentService } from './service.ts';
@@ -37,7 +38,8 @@ export async function paymentRoutes(app: FastifyInstance, deps: Deps): Promise<v
 
   // --- Driver subscriptions --------------------------------------------------------------
 
-  app.get('/subscription-plans', async () => {
+  app.get('/subscription-plans', async (request) => {
+    const lang = langOf(request);
     const { rows } = await db.query(
       `SELECT sp.code, sp.name, sp.price_tiyin::int AS "priceTiyin", sp.period_days AS "periodDays"
          FROM subscription_plans sp JOIN cities c ON c.id = sp.city_id
@@ -45,7 +47,7 @@ export async function paymentRoutes(app: FastifyInstance, deps: Deps): Promise<v
         ORDER BY sp.period_days`,
       [cityCode],
     );
-    return { plans: rows, providers: [...payments.providers.keys()] };
+    return { plans: rows.map((p) => ({ ...p, name: pick(p.name, lang) })), providers: [...payments.providers.keys()] };
   });
 
   app.get('/drivers/me/subscription', { preHandler: requireUser }, async (request) => {
@@ -245,11 +247,15 @@ export async function paymentRoutes(app: FastifyInstance, deps: Deps): Promise<v
       const userId = request.user!.id;
       const debts = await payments.debts(db, userId);
       const results = [];
+      // The card must be the payer's own (checked inside cardToken).
+      await payments.cardToken(db, userId, request.body.cardId);
       for (const d of debts) {
-        const status = await payments.chargeSavedCard({
-          type: d.kind, rideId: d.rideId, userId, cardId: request.body.cardId, driverId: d.driverId,
-          amountTiyin: d.amountTiyin, description: d.kind === 'ride' ? 'Ride' : 'Cancellation fee',
-        });
+        const status = d.kind === 'ride'
+          ? await payments.chargeRideBalance(d.rideId, request.body.cardId)
+          : await payments.chargeSavedCard({
+            type: 'cancel_fee', rideId: d.rideId, userId, cardId: request.body.cardId, driverId: d.driverId,
+            amountTiyin: d.amountTiyin, description: 'Cancellation fee',
+          });
         results.push({ rideId: d.rideId, kind: d.kind, status });
       }
       const left = await payments.debts(db, userId);

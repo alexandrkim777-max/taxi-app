@@ -6,6 +6,7 @@ export interface AuthUser {
   id: string;
   phone: string;
   roles: string[];
+  language: string;
 }
 
 declare module 'fastify' {
@@ -21,7 +22,7 @@ export async function loadUser(db: pg.Pool, request: FastifyRequest): Promise<vo
   if (!header?.startsWith('Bearer ')) return;
   const token = header.slice('Bearer '.length).trim();
   const { rows } = await db.query<AuthUser>(
-    `SELECT u.id, u.phone, u.roles
+    `SELECT u.id, u.phone, u.roles, u.language
        FROM sessions s JOIN users u ON u.id = s.user_id
       WHERE s.token_hash = $1 AND s.revoked_at IS NULL AND s.expires_at > now()
         AND u.deleted_at IS NULL`,

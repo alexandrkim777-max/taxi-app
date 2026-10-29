@@ -48,19 +48,12 @@ interface CreateBody {
 
 
 export async function rideRoutes(app: FastifyInstance, { db, routes, cityCode, payments }: Deps): Promise<void> {
-  /** Card rides: charge the fare (incl. paid waiting) once the ride is completed. */
+  /**
+   * Card rides at completion: charge whatever is still due (the whole fare if the ride ended before
+   * the 60% prepayment, or the rest after a route change). A decline now becomes a debt.
+   */
   async function chargeRide(rideId: string): Promise<void> {
-    const { rows } = await db.query(
-      `SELECT passenger_id, card_id, driver_id, locked_price_tiyin FROM rides
-        WHERE id = $1 AND payment_method = 'card' AND payment_status = 'pending'`,
-      [rideId],
-    );
-    const r = rows[0];
-    if (!r) return;
-    await payments.chargeSavedCard({
-      type: 'ride', rideId, userId: r.passenger_id, cardId: r.card_id, driverId: r.driver_id,
-      amountTiyin: Number(r.locked_price_tiyin), description: 'Ride',
-    });
+    await payments.chargeRideBalance(rideId);
   }
 
   /** A cancellation fee is charged to the ride's card right away; for cash rides it stays a debt. */
@@ -468,13 +461,69 @@ export async function rideRoutes(app: FastifyInstance, { db, routes, cityCode, p
         await tx.query(`UPDATE rides SET status = $2 WHERE id = $1`, [ride.id, next]);
         if (next === 'completed') {
           await setPresenceStatus(tx, ride.driver_id!, 'online');
-          await tx.query(`UPDATE rides SET payment_status = 'pending' WHERE id = $1 AND payment_method = 'card'`, [ride.id]);
         }
         await logEvent(tx, ride.id, `status:${next}`, 'driver', userId, { from: ride.status });
       });
       // Charged after the ride is committed as completed; a failed charge becomes a debt.
       if (next === 'completed') await chargeRide(request.params.id);
       return rideView(db, request.params.id, 'driver');
+    },
+  );
+
+  // The card was declined at 60% (or the passenger changed their mind): pay cash or use another card.
+  app.post<{ Params: { id: string }; Body: { method: 'cash' | 'card'; cardId?: string } }>(
+    '/rides/:id/payment',
+    {
+      preHandler: requireUser,
+      config: { rateLimit: { max: 10, timeWindow: '1 minute' } },
+      schema: {
+        params: uuidParams,
+        body: {
+          type: 'object', required: ['method'], additionalProperties: false,
+          properties: { method: { type: 'string', enum: ['cash', 'card'] }, cardId: UUID },
+        },
+      },
+    },
+    async (request) => {
+      const userId = request.user!.id;
+      const rideId = request.params.id;
+      let chargeNow = false;
+      await withTx(db, async (tx) => {
+        const { ride, role } = await rideFor(tx, rideId, userId, true);
+        if (role !== 'passenger') throw new HttpError(404, 'not_found');
+        if (!['created', 'accepted', 'driver_en_route', 'arrived', 'in_progress'].includes(ride.status)) {
+          throw new HttpError(409, 'ride_not_active');
+        }
+        const { rows } = await tx.query<{ payment_status: string | null }>(`SELECT payment_status FROM rides WHERE id = $1`, [rideId]);
+        // A charge already on its way to the provider cannot be switched under it.
+        if (rows[0]!.payment_status === 'pending') throw new HttpError(409, 'payment_in_progress');
+        if (rows[0]!.payment_status === 'paid') throw new HttpError(409, 'already_paid');
+        if (request.body.method === 'cash') {
+          // The rest of the fare (the whole fare unless something was already charged) goes to the driver in cash.
+          await tx.query(`UPDATE rides SET payment_method = 'cash', card_id = NULL, payment_status = NULL WHERE id = $1`, [rideId]);
+        } else {
+          if (!request.body.cardId) throw new HttpError(400, 'card_required');
+          const card = await tx.query(
+            `SELECT 1 FROM payment_cards WHERE id = $1 AND user_id = $2 AND deleted_at IS NULL`,
+            [request.body.cardId, userId],
+          );
+          if (!card.rows[0]) throw new HttpError(404, 'card_not_found');
+          // After a decline during the trip, try the new card straight away.
+          chargeNow = rows[0]!.payment_status === 'failed';
+          await tx.query(
+            `UPDATE rides SET payment_method = 'card', card_id = $2,
+                    payment_status = CASE WHEN payment_status = 'failed' THEN 'pending' ELSE payment_status END
+              WHERE id = $1`,
+            [rideId, request.body.cardId],
+          );
+        }
+        await logEvent(tx, rideId, 'payment_method_changed', 'passenger', userId, { method: request.body.method });
+      });
+      if (chargeNow) {
+        const result = await payments.chargeRideBalance(rideId);
+        await logEvent(db, rideId, result === 'failed' ? 'prepay_failed' : 'prepaid', 'system', null, { result });
+      }
+      return rideView(db, rideId, 'passenger');
     },
   );
 
