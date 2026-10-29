@@ -84,6 +84,9 @@ every item below has a regression test in `apps/api/test/security.test.ts` or th
   removed from the map; paused drivers are skipped by dispatch and cannot accept.
 - Ratings: participants only, completed rides only, once per side, 72 h window, reason required below 4,
   no self-rating. Only averages are exposed (after 5 ratings); authors, single scores and reasons are not.
+- Rating tags come from a fixed list, must match the score's tone and the rated side. Only a driver's top
+  positive tags are public; negative tags are visible to that driver and moderators only. Safety tags and
+  1–2 stars open a complaint for moderators automatically.
 
 ## Payments
 

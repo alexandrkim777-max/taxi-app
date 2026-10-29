@@ -6,6 +6,7 @@ import { UZ_LAT, UZ_LNG } from '../lib/geo.ts';
 import { HttpError } from '../lib/tx.ts';
 import { pickupMin } from '../dispatch/matching.ts';
 import { waitingOf } from './cancellation.ts';
+import { driverHighlights } from '../ratings/highlights.ts';
 
 export type Q = pg.Pool | pg.PoolClient;
 
@@ -152,6 +153,7 @@ export async function rideView(q: Q, rideId: string, role: Role) {
   if (r.driver_id) {
     view.driver = {
       name: r.driverName, rating: r.driverRating,
+      highlights: await driverHighlights(q, r.driver_id),
       vehicle: { makeModel: r.makeModel, color: r.color, plate: r.plate },
       // Live position only while the ride is active, and only to its participants.
       location: r.driverLat != null
@@ -160,6 +162,17 @@ export async function rideView(q: Q, rideId: string, role: Role) {
     };
   }
   if (role === 'driver') view.passenger = { name: r.passengerName, rating: r.passengerRating };
+  // End-of-ride screen: has this side rated yet?
+  if (r.status === 'completed') {
+    const mine = await q.query<{ score: number }>(
+      `SELECT rt.score FROM ratings rt JOIN rides ri ON ri.id = rt.ride_id
+        WHERE rt.ride_id = $1
+          AND rt.from_user = CASE WHEN $2 = 'passenger' THEN ri.passenger_id
+                                  ELSE (SELECT user_id FROM drivers WHERE id = ri.driver_id) END`,
+      [rideId, role],
+    );
+    view.rating = { myScore: mine.rows[0]?.score ?? null, canRate: !mine.rows[0] };
+  }
   // Waiting at the pickup: a live counter while the driver waits, then what was charged.
   if (r.status === 'arrived') {
     view.waiting = await waitingOf(q, rideId);

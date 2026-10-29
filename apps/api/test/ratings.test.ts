@@ -74,7 +74,8 @@ test('averages show only after 5 ratings and never reveal who rated', { skip }, 
     assert.equal((await rate(s, pax, rideId, score, score < 4 ? 'Was late' : undefined)).statusCode, 204);
   }
   const me = (await s.app.inject({ method: 'GET', url: '/me/ratings', headers: driver })).json();
-  assert.deepEqual(me.asDriver, { rating: 4.4, count: 5 });
+  assert.equal(me.asDriver.rating, 4.4);
+  assert.equal(me.asDriver.count, 5);
   assert.equal(JSON.stringify(me).includes('Was late'), false, 'reasons and authors stay private');
   await s.app.close();
 });
@@ -100,5 +101,56 @@ test('with equal price and pickup, the better-rated driver gets the one-tap orde
   const reqs = async (h: Headers) => (await s.app.inject({ method: 'GET', url: '/drivers/me/requests', headers: h })).json();
   assert.equal((await reqs(high)).length, 1);
   assert.equal((await reqs(low)).length, 0);
+  await s.app.close();
+});
+
+async function rateTags(s: Setup, auth: Headers, rideId: string, score: number, tags: string[], reason?: string) {
+  return s.app.inject({
+    method: 'POST', url: `/rides/${rideId}/rating`, headers: auth,
+    payload: reason ? { score, tags, reason } : { score, tags },
+  });
+}
+
+test('end of ride: "what did you like" tags, shown as driver highlights', { skip }, async () => {
+  const s = await setup();
+  const tags = (await s.app.inject({ method: 'GET', url: '/rating-tags?about=driver' })).json();
+  const clean = tags.positive.find((t: { code: string }) => t.code === 'clean_car');
+  assert.equal(clean.label.ru, 'Чисто в салоне');
+  assert.ok(tags.negative.some((t: { code: string }) => t.code === 'unsafe_driving'));
+
+  const r = await completedRide(s);
+  const before = (await s.app.inject({ method: 'GET', url: `/rides/${r.rideId}`, headers: r.pax })).json();
+  assert.deepEqual(before.rating, { myScore: null, canRate: true }, 'the app opens the rating screen');
+
+  // Tags must fit the score and the side being rated.
+  assert.equal((await rateTags(s, r.pax, r.rideId, 5, ['dirty_car'])).statusCode, 400);
+  assert.equal((await rateTags(s, r.pax, r.rideId, 5, ['p_polite'])).statusCode, 400);
+  assert.equal((await rateTags(s, r.pax, r.rideId, 5, ['made_up'])).statusCode, 400);
+  assert.equal((await rateTags(s, r.pax, r.rideId, 5, ['clean_car', 'clean_car'])).statusCode, 400);
+  assert.equal((await rateTags(s, r.pax, r.rideId, 5, ['clean_car', 'careful_driving', 'polite', 'knows_city', 'on_time', 'quiet_ride'])).statusCode, 400);
+
+  assert.equal((await rateTags(s, r.pax, r.rideId, 5, ['clean_car', 'careful_driving'])).statusCode, 204);
+  const after = (await s.app.inject({ method: 'GET', url: `/rides/${r.rideId}`, headers: r.pax })).json();
+  assert.deepEqual(after.rating, { myScore: 5, canRate: false });
+  const codes = after.driver.highlights.map((h: { code: string }) => h.code).sort();
+  assert.deepEqual(codes, ['careful_driving', 'clean_car']);
+
+  // The driver rates the passenger with their own tags.
+  assert.equal((await rateTags(s, r.driver, r.rideId, 5, ['p_on_time'])).statusCode, 204);
+  await s.app.close();
+});
+
+test('safety tags and 1–2 stars reach the moderators; negative tags stay private', { skip }, async () => {
+  const s = await setup();
+  const r = await completedRide(s);
+  // A tag is enough of a reason for a low score.
+  assert.equal((await rateTags(s, r.pax, r.rideId, 2, ['unsafe_driving', 'phone_while_driving'])).statusCode, 204);
+  const complaints = await db.query(`SELECT type, status FROM complaints WHERE ride_id = $1`, [r.rideId]);
+  assert.deepEqual(complaints.rows, [{ type: 'rating_safety:unsafe_driving,phone_while_driving', status: 'open' }]);
+
+  const view = (await s.app.inject({ method: 'GET', url: `/rides/${r.rideId}`, headers: r.pax })).json();
+  assert.equal(view.driver.highlights.length, 0, 'negative tags are never shown to passengers');
+  const mine = (await s.app.inject({ method: 'GET', url: '/me/ratings', headers: r.driver })).json();
+  assert.ok(mine.asDriver.tags.some((t: { code: string }) => t.code === 'unsafe_driving'), 'the driver sees what to improve');
   await s.app.close();
 });

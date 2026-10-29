@@ -69,7 +69,8 @@ Tests: `npm test` (the API integration tests need a migrated database at `DATABA
 | POST | `/rides/:id/status` | assigned driver | `driver_en_route` → `arrived` → `in_progress` → `completed` |
 | GET | `/rides/:id/cancel-terms` | participants | What cancelling now costs, with breakdown (fee + waiting) |
 | POST | `/rides/:id/cancel` | passenger or driver | Before the trip starts; the passenger confirms any fee (`acceptFeeTiyin`), the driver may cancel as `noShow` after 5 min |
-| POST | `/rides/:id/rating` | participants | 1–5 after a completed ride (reason required below 4), once, within 72 h |
+| GET | `/rating-tags?about=driver` | anyone | Tags for the end-of-ride screen (clean car, careful driving, …) in uz / ru / en |
+| POST | `/rides/:id/rating` | participants | 1–5 + up to 5 tags after a completed ride (below 4: a tag or a reason), once, within 72 h |
 | GET | `/me/ratings` | user | Own averages (shown after 5 ratings), completed and cancelled rides |
 | GET | `/subscription-plans` | anyone | Plans for sale and enabled payment providers |
 | GET | `/drivers/me/subscription` | verified driver | Active until, paid periods |
