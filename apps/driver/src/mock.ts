@@ -25,7 +25,7 @@ const state: Row = {
 };
 
 const TRIPS = [
-  { pickup: 'Chilonzor, 9-kvartal, 14-uy, 2-podyezd', dropoff: 'Toshkent City Mall', distanceM: 7400, durationS: 1260, priceTiyin: 2_650_000, passenger: 'Madina', rating: 4.95, pickupM: 650 },
+  { entrance: '2', pickup: 'Chilonzor, 9-kvartal, 14-uy', dropoff: 'Toshkent City Mall', distanceM: 7400, durationS: 1260, priceTiyin: 2_650_000, passenger: 'Madina', rating: 4.95, pickupM: 650 },
   { pickup: 'Yunusobod, Amir Temur 107', dropoff: 'Xalqaro aeroport, 2-terminal', distanceM: 12800, durationS: 1680, priceTiyin: 3_950_000, passenger: 'Olga', rating: 4.8, pickupM: 1200 },
   { pickup: 'Mirzo Ulugʻbek, Buyuk Ipak Yoʻli 52', dropoff: 'Chorsu bozori', distanceM: 9100, durationS: 1500, priceTiyin: 2_950_000, passenger: 'Javlon', rating: null, pickupM: 900 },
 ];
@@ -42,7 +42,7 @@ function rideView() {
   const view: Row = {
     id: r.id, status: r.status, priceTiyin: r.priceTiyin + (r.waitingCharged ?? 0), route: { distanceM: r.distanceM, durationS: r.durationS },
     stops: [
-      { position: 0, lat: 41.2856, lng: 69.2034, address: r.pickup },
+      { position: 0, lat: 41.2856, lng: 69.2034, address: r.pickup, entrance: r.entrance ?? null },
       { position: 1, lat: 41.3111, lng: 69.2486, address: r.dropoff },
     ],
     passenger: { name: r.passenger, rating: r.rating },
@@ -166,7 +166,7 @@ export async function mockApi(method: string, fullPath: string, body: any): Prom
       state.request = { rideId: `r${tripIndex}`, offerId: `o${tripIndex}`, priceTiyin: t.priceTiyin, expiresAt: iso(now() + 15_000),
         distanceM: t.distanceM, durationS: t.durationS, options: tripIndex % 2 ? { childSeat: true } : {}, comment: tripIndex % 2 ? '2-podyezd, domofon 45' : null,
         passengerRating: t.rating, pickupDistanceM: t.pickupM,
-        stops: [{ position: 0, lat: 41.2856, lng: 69.2034, address: t.pickup }, { position: 1, lat: 41.3111, lng: 69.2486, address: t.dropoff }], _t: t };
+        stops: [{ position: 0, lat: 41.2856, lng: 69.2034, address: t.pickup, entrance: t.entrance ?? null }, { position: 1, lat: 41.3111, lng: 69.2486, address: t.dropoff }], _t: t };
     }
     return ok(state.request ? [state.request] : []);
   }

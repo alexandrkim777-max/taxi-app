@@ -191,6 +191,37 @@ export async function rideRoutes(app: FastifyInstance, { db, routes, cityCode, p
     },
   );
 
+  // The passenger's past rides: receipts, and the way to a complaint or dispute after the ride.
+  app.get<{ Querystring: { before?: string } }>(
+    '/me/rides',
+    {
+      preHandler: requireUser,
+      schema: { querystring: { type: 'object', additionalProperties: false, properties: { before: { type: 'string', format: 'date-time' } } } },
+    },
+    async (request) => {
+      const { rows } = await db.query(
+        `SELECT r.id, r.status, vc.code AS "classCode", r.locked_price_tiyin::int AS "priceTiyin",
+                r.payment_method AS "paymentMethod", r.created_at AS "createdAt",
+                r.cancel_fee_tiyin::int AS "cancelFeeTiyin", du.name AS "driverName",
+                v.make_model AS "makeModel", v.plate,
+                (SELECT address FROM ride_stops s WHERE s.ride_id = r.id ORDER BY position LIMIT 1) AS "fromAddress",
+                (SELECT json_build_object('address', address, 'lat', ST_Y(point::geometry), 'lng', ST_X(point::geometry))
+                   FROM ride_stops s WHERE s.ride_id = r.id ORDER BY position DESC LIMIT 1) AS "to",
+                EXISTS (SELECT 1 FROM disputes x WHERE x.ride_id = r.id) AS "hasDispute"
+           FROM rides r
+           JOIN vehicle_classes vc ON vc.id = r.class_id
+           LEFT JOIN drivers d ON d.id = r.driver_id
+           LEFT JOIN users du ON du.id = d.user_id
+           LEFT JOIN vehicles v ON v.id = r.vehicle_id
+          WHERE r.passenger_id = $1 AND r.deleted_at IS NULL AND r.status IN ('completed', 'cancelled')
+            AND ($2::timestamptz IS NULL OR r.created_at < $2::timestamptz)
+          ORDER BY r.created_at DESC LIMIT 20`,
+        [request.user!.id, request.query.before ?? null],
+      );
+      return rows;
+    },
+  );
+
   // The passenger's or driver's current ride, so the app can restore its screen after a restart.
   app.get('/rides/active', { preHandler: requireUser }, async (request, reply) => {
     const { rows } = await db.query<{ id: string; role: Role }>(

@@ -9,7 +9,7 @@ import { api, ApiError, errorText } from './api';
 import { currentPosition, requestPermission, startTracking, stopTracking } from './location';
 import { useApp } from './context';
 
-export interface Stop { position: number; lat: number; lng: number; address: string | null }
+export interface Stop { position: number; lat: number; lng: number; address: string | null; entrance?: string | null }
 export interface Request {
   rideId: string; offerId: string; priceTiyin: number; expiresAt: string; distanceM: number; durationS: number;
   options: Record<string, boolean>; comment: string | null; passengerRating: number | null; pickupDistanceM: number | null; stops: Stop[];

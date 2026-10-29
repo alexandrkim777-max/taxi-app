@@ -1,0 +1,38 @@
+{
+  "expo": {
+    "name": "Taxi",
+    "slug": "taxi-passenger",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "automatic",
+    "scheme": "taxi",
+    "platforms": [
+      "ios",
+      "android",
+      "web"
+    ],
+    "ios": {
+      "bundleIdentifier": "uz.taxi.passenger",
+      "supportsTablet": false,
+      "infoPlist": {
+        "NSLocationWhenInUseUsageDescription": "To put the pickup pin where you are and show cars nearby."
+      }
+    },
+    "android": {
+      "package": "uz.taxi.passenger",
+      "permissions": [
+        "ACCESS_FINE_LOCATION",
+        "ACCESS_COARSE_LOCATION"
+      ]
+    },
+    "plugins": [
+      "@maplibre/maplibre-react-native",
+      "expo-secure-store",
+      "expo-location"
+    ],
+    "web": {
+      "bundler": "metro",
+      "output": "single"
+    }
+  }
+}

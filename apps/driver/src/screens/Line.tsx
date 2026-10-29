@@ -123,6 +123,7 @@ function Stops({ stops }: { stops: Stop[] }) {
             <View style={{ flex: 1 }}>
               <T v="caption" muted>{i === 0 ? t.pickup : last ? t.dropoff : t.stop}</T>
               <T v="bodyStrong">{s.address ?? `${s.lat.toFixed(5)}, ${s.lng.toFixed(5)}`}</T>
+              {i === 0 && s.entrance ? <Pill tone="brand">{t.entrance} {s.entrance}</Pill> : null}
             </View>
           </Row>
         );

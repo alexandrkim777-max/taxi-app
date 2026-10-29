@@ -87,3 +87,26 @@ test('saved places: home / work replaced, others capped, owner only', { skip }, 
   assert.equal((await s.app.inject({ method: 'DELETE', url: `/me/places/${added.json().id}`, headers: pax })).statusCode, 204);
   await s.app.close();
 });
+
+test('ride history: own finished rides only, newest first, with addresses', { skip }, async () => {
+  const s = await setup();
+  const spot = randomSpot();
+  const { rideId, driver, pax } = await rideWithEntrance(s, spot, {});
+  // An active ride is not history yet.
+  let res = await s.app.inject({ method: 'GET', url: '/me/rides', headers: pax });
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.json().length, 0);
+  await drive(s, driver, rideId, ['driver_en_route', 'arrived', 'in_progress', 'completed']);
+  res = await s.app.inject({ method: 'GET', url: '/me/rides', headers: pax });
+  const [r] = res.json();
+  assert.equal(r.id, rideId);
+  assert.equal(r.status, 'completed');
+  assert.equal(r.fromAddress, 'Chilonzor 9, 14-uy');
+  assert.ok(Math.abs(r.to.lat - north(spot, 5000).lat) < 1e-6, 'destination point for "ride again"');
+  assert.ok(r.priceTiyin > 0);
+  assert.equal(r.hasDispute, false);
+  // Another user sees nothing of it.
+  const other = await passenger(s);
+  res = await s.app.inject({ method: 'GET', url: '/me/rides', headers: other });
+  assert.equal(res.json().length, 0);
+});

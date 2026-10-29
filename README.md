@@ -87,6 +87,7 @@ Tests: `npm test` (the API integration tests need a migrated database at `DATABA
 | GET | `/geo/reverse?lat=&lng=` | user | Address of a point on the map |
 | GET | `/geo/entrances?lat=&lng=` | user | Known entrances (подъезды) within 120 m of a pickup |
 | GET / PUT / POST / DELETE | `/me/places`, `/me/places/home`, `/me/places/work`, `/me/places/:id` | user | Saved places: home, work and up to 10 more |
+| GET | `/me/rides?before=` | user | Past rides (20 per page): price, addresses, driver, car, whether a dispute is open |
 | POST | `/rides/:id/complaint` | participants | Complaint about the ride (rude, unsafe driving, asked for extra cash, …) |
 
 ### Driver app
@@ -108,6 +109,31 @@ npm run build:demo                      # clickable web demo with a pretend serv
 - Session token in the phone's secure storage (Keychain / Keystore). Theme follows the design tokens
   and switches to night automatically after 19:00.
 - Background location and the camera need a development build (`npx expo run:android`); Expo Go covers the rest.
+
+### Passenger app
+
+```bash
+cd apps/passenger && npm install
+EXPO_PUBLIC_API_URL=http://<your-computer-ip>:3000 EXPO_PUBLIC_TILES_URL=http://<map-server>:3001 npx expo run:android   # MapLibre needs a dev build
+npm run build:demo                      # clickable web demo with a pretend server and a schematic map
+```
+
+- Language first (uz / ru / en), SMS login.
+- Map with the pickup pin (drag the map to move it), "Where to?" search on our own geocoder, home / work /
+  saved places, recent destinations.
+- Order: entrance chips (learnt from earlier pickups) or a typed entrance number, extra stops, class with
+  the one-tap price and pickup time, or "choose a driver" with each driver's own price; an admin
+  coefficient other than 1 is shown openly; cash or a saved card; wishes and a note.
+- Searching; "only a pricier driver is left" asks for consent; the driver card (rating, what passengers
+  liked, car, plate), the car moving on the map, free / paid waiting, trip progress.
+- Add a stop or change the destination: the new price is shown and applied only after confirming.
+- Cancel shows the exact fee first (half while the driver is on the way after 3 min, full + waiting after
+  arrival). A safety button files an unsafe-driving report and offers to call 102.
+- Card declined at 60% of the trip: pay cash or pick another card. Unpaid amounts block the next order
+  until paid.
+- Rating with tags; ride history with complaint and dispute (both sides write their account).
+- Cards are added through the payment provider's SDK (stubbed until access is granted); the card number
+  never reaches our server. Requests time out (10–15 s); reads are retried once, writes never.
 
 ### Maps
 

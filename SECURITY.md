@@ -129,6 +129,17 @@ every item below has a regression test in `apps/api/test/security.test.ts` or th
   data never ships. Pages are marked `noindex`.
 - To do: move the token to an httpOnly cookie with CSRF protection and add 2FA before launch.
 
+## Passenger app
+
+- Session token in the phone's secure storage (Keychain / Keystore); in the web demo it lives in memory only.
+- No secrets in the app: the API URL and tile server URL are public settings. Card numbers go to the
+  payment provider's SDK only; our API gets the provider's token. The fake card tokenizer works only in
+  development and the demo, and the API refuses the fake provider in production.
+- Every price the passenger agrees to is the server's number, sent back for an exact match
+  (`maxPriceTiyin`, `confirm-price`, route `priceTiyin`, cancel `acceptFeeTiyin`); nothing is priced on the phone.
+- The demo's pretend server is swapped for an empty stub in real builds (checked: no demo data in the bundle).
+- A 401 from the API signs the app out at once.
+
 ## Maps and places
 
 - Address search runs on our own Nominatim; passenger searches and positions never go to a third-party map service.
