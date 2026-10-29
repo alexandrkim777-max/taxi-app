@@ -1,12 +1,13 @@
-import Fastify from 'fastify';
+import { buildApp } from './app.ts';
 import { config } from './config.ts';
 import { pool } from './db.ts';
+import { createSmsSender } from './sms/index.ts';
 
-const app = Fastify({ logger: true });
-
-app.get('/health', async () => {
-  const { rows } = await pool.query('SELECT 1 AS ok');
-  return { status: 'ok', db: rows[0]?.ok === 1 };
+const app = await buildApp({
+  db: pool,
+  sms: createSmsSender(config.smsProvider),
+  authSecret: config.authSecret,
+  logger: true,
 });
 
 try {

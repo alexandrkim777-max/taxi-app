@@ -33,6 +33,26 @@ npm run dev:api               # API on http://localhost:3000
 curl localhost:3000/health
 ```
 
+In development SMS codes are printed to the API log (`SMS_PROVIDER=console`).
+
+Tests: `npm test` (the API integration tests need a migrated database at `DATABASE_URL`).
+
+## API so far
+
+| Method | Path | Who | What |
+| --- | --- | --- | --- |
+| POST | `/auth/request-code` | anyone | Sends a 6-digit SMS code; one per phone per 60 s, valid 5 min |
+| POST | `/auth/verify` | anyone | Checks the code (max 5 attempts), returns a bearer token (90 days) |
+| POST | `/auth/logout` | user | Revokes the current token |
+| GET | `/me` | user | Current user |
+| POST | `/drivers/apply` | user | Becomes a driver (status `pending`) |
+| GET | `/drivers/me` | driver | Profile, vehicles, documents, missing document types |
+| POST | `/drivers/me/vehicles` | driver | Adds a car; the class is set by a moderator |
+| POST | `/drivers/me/documents` | driver | Uploads a document link; replaces the previous one of that type |
+| GET | `/admin/drivers?status=pending` | admin | Moderation queue |
+| POST | `/admin/drivers/:id/approve` | admin | Assigns the class, approves documents, starts the free trial month |
+| POST | `/admin/drivers/:id/reject` | admin | Rejects with a reason the driver sees |
+
 ## Principles (see the product spec)
 
 - Ride price is copied into the ride at order time and never changes without explicit passenger confirmation.
