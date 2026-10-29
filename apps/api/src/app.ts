@@ -4,6 +4,7 @@ import type pg from 'pg';
 import type { SmsSender } from './sms/index.ts';
 import type { RouteProvider } from './routing/index.ts';
 import { loadUser } from './auth/session.ts';
+import { HttpError } from './lib/tx.ts';
 import { authRoutes } from './auth/routes.ts';
 import { driverRoutes } from './drivers/routes.ts';
 import { tariffRoutes } from './tariffs/routes.ts';
@@ -44,6 +45,7 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
       request.log.error(error);
       return reply.code(500).send({ error: 'internal_error' });
     }
+    if (error instanceof HttpError) return reply.code(status).send({ error: error.code, ...error.extra });
     return reply.code(status).send({ error: error.code ?? 'bad_request', message: error.message });
   });
 

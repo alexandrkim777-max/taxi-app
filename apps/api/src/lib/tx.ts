@@ -28,9 +28,12 @@ export function isUniqueViolation(err: unknown, constraint?: string): boolean {
 export class HttpError extends Error {
   statusCode: number;
   code: string;
-  constructor(statusCode: number, code: string) {
+  /** Extra fields for the client (e.g. the fee to confirm); never put internals here. */
+  extra: Record<string, unknown>;
+  constructor(statusCode: number, code: string, extra: Record<string, unknown> = {}) {
     super(code);
     this.statusCode = statusCode;
     this.code = code;
+    this.extra = extra;
   }
 }

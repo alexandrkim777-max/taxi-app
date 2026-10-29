@@ -266,7 +266,16 @@ test('cancel: free before arrival, fee after, shown and confirmed first', { skip
   const fake = await s.app.inject({ method: 'POST', url: `/rides/${r.rideId}/status`, headers: r.driver, payload: { status: 'arrived' } });
   assert.equal(fake.statusCode, 409);
   assert.equal(fake.json().error, 'not_at_pickup');
-  await drive(s, r.driver, r.rideId, ['arrived']);
+  // 80 m away is still too far (limit 50 m); the app is told how far.
+  await s.app.inject({ method: 'POST', url: '/drivers/me/location', headers: r.driver, payload: north(r.spot, 80) });
+  const close = await s.app.inject({ method: 'POST', url: `/rides/${r.rideId}/status`, headers: r.driver, payload: { status: 'arrived' } });
+  assert.equal(close.statusCode, 409);
+  assert.ok(close.json().distanceM >= 75 && close.json().distanceM <= 85, close.body);
+  assert.equal(close.json().maxDistanceM, 50);
+  // 40 m away is fine.
+  await s.app.inject({ method: 'POST', url: '/drivers/me/location', headers: r.driver, payload: north(r.spot, 40) });
+  const near = await s.app.inject({ method: 'POST', url: `/rides/${r.rideId}/status`, headers: r.driver, payload: { status: 'arrived' } });
+  assert.equal(near.statusCode, 200, near.body);
 
   const terms = (await s.app.inject({ method: 'GET', url: `/rides/${r.rideId}/cancel-terms`, headers: r.pax })).json();
   assert.equal(terms.feeTiyin, 500_000, 'economy: 5 000 sum');

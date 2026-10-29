@@ -6,13 +6,17 @@
 //     driver cancels as a no-show after 5 min  -> the same fee;
 //     driver cancels for any other reason      -> free for the passenger.
 // - The passenger always sees the fee before cancelling and must confirm that exact amount.
-// - Drivers cannot farm fees: 'arrived' is accepted only when their live position is at the pickup.
+// - Drivers cannot farm fees: 'arrived' is accepted only within 50 m of the pickup.
 
 import type { RideStatus } from '@taxi/shared';
 import type { Q, Role } from './common.ts';
 
-/** How close to the pickup the driver must be to mark 'arrived'. */
-export const ARRIVAL_RADIUS_M = 150;
+/**
+ * How close to the pickup the driver must be to mark 'arrived'. Kept tight on purpose; phone GPS
+ * in dense blocks can be off by 20–40 m, so refused attempts are logged with their distance to
+ * check this against real data after launch.
+ */
+export const ARRIVAL_RADIUS_M = 50;
 /** How long the driver waits at the pickup before a no-show is accepted. */
 export const NO_SHOW_WAIT_MIN = 5;
 

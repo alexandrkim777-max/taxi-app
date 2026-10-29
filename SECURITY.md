@@ -72,7 +72,7 @@ every item below has a regression test in `apps/api/test/security.test.ts` or th
 
 ## Cancellation fee
 
-- 'Arrived' is accepted only when the driver's fresh live position is within 150 m of the pickup,
+- 'Arrived' is accepted only when the driver's fresh live position is within 50 m of the pickup,
   so a driver cannot start the paid-cancellation clock from elsewhere.
 - No-show only by the driver and only after 5 minutes at the pickup (measured from the logged arrival).
 - The passenger is charged only after confirming the exact fee returned by `cancel-terms`.
