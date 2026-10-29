@@ -34,7 +34,7 @@ export async function driverProfile(db: pg.Pool, driverId: string) {
     [driverId],
   );
   const documents = await db.query<{ type: string }>(
-    `SELECT id, type, status, note, created_at FROM driver_documents
+    `SELECT id, type, status, note, file_url AS "fileUrl", created_at FROM driver_documents
       WHERE driver_id = $1 AND deleted_at IS NULL ORDER BY created_at`,
     [driverId],
   );

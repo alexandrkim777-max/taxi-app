@@ -1,0 +1,73 @@
+/* Generated from packages/shared/design/tokens.json by scripts/tokens-to-css.mjs. Do not edit. */
+:root {
+  --surface-page: #F7F2EA;
+  --surface-card: #FFFFFF;
+  --surface-sunken: #EDE6DA;
+  --border: #D8CDBB;
+  --ink: #1B2A3A;
+  --ink-muted: #5E6B78;
+  --brand: #0B6A70;
+  --on-brand: #FFFFFF;
+  --link: #0B6A70;
+  --warm: #B5532E;
+  --warm-tint: #FBE7DE;
+  --warm-ink: #8E3B1C;
+  --success: #1E7F4E;
+  --danger: #B42318;
+  --map-road: #FFFFFF;
+  --route: #0B6A70;
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --radius-sm: 12px;
+  --radius-md: 16px;
+  --radius-lg: 20px;
+  --radius-xl: 32px;
+  --radius-pill: 28px;
+  --touch-min: 44px;
+  --button-main: 56px;
+  --font-sans: "Rubik", system-ui, sans-serif;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --surface-page: #0E1116;
+    --surface-card: #1B222B;
+    --surface-sunken: #161B22;
+    --border: #2C333D;
+    --ink: #F2F4F7;
+    --ink-muted: #A3ACB9;
+    --brand: #C6F432;
+    --on-brand: #0E1116;
+    --link: #C6F432;
+    --warm: #E07A52;
+    --warm-tint: #3A2621;
+    --warm-ink: #F2A98A;
+    --success: #4CD08A;
+    --danger: #FF6B5E;
+    --map-road: #232A33;
+    --route: #C6F432;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --surface-page: #0E1116;
+  --surface-card: #1B222B;
+  --surface-sunken: #161B22;
+  --border: #2C333D;
+  --ink: #F2F4F7;
+  --ink-muted: #A3ACB9;
+  --brand: #C6F432;
+  --on-brand: #0E1116;
+  --link: #C6F432;
+  --warm: #E07A52;
+  --warm-tint: #3A2621;
+  --warm-ink: #F2A98A;
+  --success: #4CD08A;
+  --danger: #FF6B5E;
+  --map-road: #232A33;
+  --route: #C6F432;
+  color-scheme: dark;
+}

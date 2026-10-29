@@ -7,3 +7,5 @@ dist/
 .expo/
 .next/
 coverage/
+apps/admin/dist/
+apps/admin/dist-demo/

@@ -12,7 +12,7 @@ Working name — the brand name is not chosen yet.
 apps/
   api/        Backend (Node.js, TypeScript, Fastify)
   mobile/     Passenger + driver app (React Native / Expo) — not scaffolded yet
-  admin/      Admin and corporate web panel (Next.js) — not scaffolded yet
+  admin/      Staff panel (React + Vite): moderation, complaints, disputes, rides, prices, finance
 packages/
   shared/     Shared types, i18n strings (uz / ru / en), design tokens
 db/
@@ -146,6 +146,22 @@ instances) handles timeouts and newly arrived drivers.
 
 Live positions sit in an `UNLOGGED` PostgreSQL table behind `apps/api/src/dispatch/presence.ts`,
 so they can move to Redis when load requires it without touching the ride logic.
+
+## Admin panel
+
+```bash
+npm run dev:api                   # API on :3000
+npm run dev:admin                 # panel on http://localhost:5173 (proxies /api to the API)
+npm run build:demo -w apps/admin  # clickable demo with sample data (no API needed)
+```
+
+In production the panel and the API are served from one domain (`/admin` static files, `/api` → API),
+so there is no CORS and the session never leaves the origin. Staff sign in with the same SMS login;
+only accounts with the `admin` or `support` role get in.
+
+Colors, type and spacing come from `packages/shared/design/tokens.json` (the design system):
+`apps/admin/scripts/tokens-to-css.mjs` turns it into CSS variables for the day and night themes on
+every build, so changing a token changes the panel without touching its code.
 
 ## Payments
 

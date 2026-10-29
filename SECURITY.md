@@ -117,6 +117,16 @@ every item below has a regression test in `apps/api/test/security.test.ts` or th
   new orders only and is stored on each ride, so a later change never alters an existing price.
 - Blocking a driver removes them from the map at once; blocks carry a reason and are lifted with one.
 
+## Staff panel (web)
+
+- Served from the API's own domain; no CORS, no third-party scripts except Google Fonts.
+- The session token is kept in `sessionStorage` (cleared when the tab closes), never in a cookie or URL.
+- Only `admin` / `support` accounts are let in; every screen calls the same role-checked API, so hiding a
+  button is never the only protection.
+- The demo build answers from an in-browser mock; the real build replaces it with an empty stub, so sample
+  data never ships. Pages are marked `noindex`.
+- To do: move the token to an httpOnly cookie with CSRF protection and add 2FA before launch.
+
 ## Errors
 
 - Internal errors return a generic `internal_error`; details go only to the server log.

@@ -4,6 +4,7 @@
   "version": "0.0.0",
   "workspaces": [
     "apps/api",
+    "apps/admin",
     "packages/shared"
   ],
   "scripts": {
@@ -11,7 +12,8 @@
     "build": "npm run build --workspaces --if-present",
     "typecheck": "npm run typecheck --workspaces --if-present",
     "db:migrate": "npm run migrate --workspace apps/api",
-    "test": "npm test --workspaces --if-present"
+    "test": "npm test --workspaces --if-present",
+    "dev:admin": "npm run dev --workspace apps/admin"
   },
   "engines": {
     "node": ">=22"
