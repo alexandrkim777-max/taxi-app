@@ -70,6 +70,15 @@ Tests: `npm test` (the API integration tests need a migrated database at `DATABA
 | POST | `/rides/:id/cancel` | passenger or driver | Before the trip starts |
 | GET | `/rides/:id` | participants | Ride, stops, offers or assigned driver with live position |
 | GET | `/rides/active` | user | Current ride, to restore the app after a restart |
+| POST | `/rides/:id/route/preview` | passenger | New price for added / removed / changed stops; nothing changes yet |
+| POST | `/rides/:id/route` | passenger | Applies the change; must confirm the exact previewed price |
+| GET | `/rides/:id/price-changes` | participants | History of price changes with old and new stops |
+| POST | `/rides/:id/dispute` | participants | Opens a dispute with your account of what happened (up to 72 h after the ride) |
+| POST | `/rides/:id/dispute/statement` | other side | Your account; 24 h to write it |
+| GET | `/rides/:id/dispute` | participants | Status, your statement, the other's (after you wrote yours), decision |
+| GET | `/admin/disputes?status=in_review` | admin | Dispute queue |
+| GET | `/admin/disputes/:id` | admin | Both statements, the ride, its event log and price changes |
+| POST | `/admin/disputes/:id/resolve` | admin | Decision and outcome, visible to both sides |
 
 Security measures: see [SECURITY.md](SECURITY.md).
 
@@ -100,7 +109,9 @@ so they can move to Redis when load requires it without touching the ride logic.
 
 ## Principles (see the product spec)
 
-- Ride price is copied into the ride at order time and never changes without explicit passenger confirmation.
+- Ride price is locked at acceptance. It changes **only** when the passenger adds, removes or changes
+  a stop and confirms the new price: no waiting charges, no driver surcharges (enforced by the database).
+- Disputes: both sides write what happened independently; a moderator decides with the ride log at hand.
 - Driver tariffs are versioned; old versions are never deleted.
 - Nothing is hard-deleted: rows carry `deleted_at`.
 - Ride status changes only through allowed transitions; every change is written to `ride_events`.

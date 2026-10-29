@@ -8,7 +8,7 @@
     "start": "node --env-file-if-exists=../../.env --experimental-strip-types src/server.ts",
     "migrate": "node --env-file-if-exists=../../.env --experimental-strip-types src/migrate.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "node --env-file-if-exists=../../.env --experimental-strip-types --test test/*.test.ts"
+    "test": "node --env-file-if-exists=../../.env --experimental-strip-types --test --test-concurrency=1 test/*.test.ts"
   },
   "dependencies": {
     "@fastify/rate-limit": "11.2.1",

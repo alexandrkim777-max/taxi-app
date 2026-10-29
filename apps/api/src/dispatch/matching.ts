@@ -133,7 +133,7 @@ export async function refreshOffers(q: Q, rideId: string): Promise<void> {
 }
 
 export async function logEvent(
-  q: Q, rideId: string, type: string, actor: 'passenger' | 'driver' | 'system', actorId: string | null, payload = {},
+  q: Q, rideId: string, type: string, actor: 'passenger' | 'driver' | 'system' | 'admin', actorId: string | null, payload = {},
 ): Promise<void> {
   await q.query(
     `INSERT INTO ride_events (ride_id, type, actor, actor_id, payload) VALUES ($1, $2, $3, $4, $5)`,

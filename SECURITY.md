@@ -58,6 +58,18 @@ every item below has a regression test in `apps/api/test/security.test.ts` or th
 - Abuse limits: 20 rides per passenger per hour, 10 ride requests and 20 searches per IP per minute,
   40 position pings per session per minute; positions outside Uzbekistan are rejected.
 
+## Price changes and disputes
+
+- After acceptance only the passenger can change the route; the driver and anyone else get 404.
+  The new price uses the tariff locked at acceptance, is re-checked under a row lock, and is applied only
+  when the passenger confirms that exact amount. At most 5 changes per ride.
+- The pickup may move at most 300 m before the driver arrives and is fixed after arrival.
+- The database accepts price changes only for `stop_added`, `stop_removed`, `address_changed`.
+- Disputes: participants only; one per ride; statements are immutable; each side sees the other's account
+  only after writing its own; a decision is possible only after both spoke or the 24 h window passed.
+  Moderation endpoints require `admin`. Statement text is stored as written — clients must render it
+  as plain text, never as HTML.
+
 ## Errors
 
 - Internal errors return a generic `internal_error`; details go only to the server log.

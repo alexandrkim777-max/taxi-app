@@ -5,63 +5,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { db, randomPhone, setup, skip, verifiedDriver, type Setup } from './helpers.ts';
+import { acceptedRide, createRide, north, offerOf, onlineDriver, passenger, randomSpot, type Headers } from './rideHelpers.ts';
 import { dispatchTick } from '../src/dispatch/matching.ts';
-
-type Headers = Record<string, string>;
-
-/** A random spot in Tashkent, so parallel test runs don't see each other's drivers. */
-function randomSpot(): { lat: number; lng: number } {
-  return { lat: 41.25 + Math.random() * 0.1, lng: 69.18 + Math.random() * 0.15 };
-}
-
-/** About `m` metres north of a point. */
-function north(p: { lat: number; lng: number }, m: number) {
-  return { lat: p.lat + m / 111_000, lng: p.lng };
-}
-
-async function passenger(s: Setup): Promise<Headers> {
-  return { authorization: `Bearer ${await s.login(randomPhone())}` };
-}
-
-async function onlineDriver(s: Setup, at: { lat: number; lng: number }): Promise<Headers> {
-  const auth = await verifiedDriver(s);
-  const res = await s.app.inject({ method: 'POST', url: '/drivers/me/online', headers: auth, payload: at });
-  assert.equal(res.statusCode, 200, res.body);
-  return auth;
-}
-
-async function createRide(s: Setup, auth: Headers, pickup: { lat: number; lng: number }) {
-  return s.app.inject({
-    method: 'POST', url: '/rides', headers: auth,
-    payload: { classCode: 'economy', mode: 'choose', stops: [pickup, north(pickup, 6000)], options: { quiet: true } },
-  });
-}
-
-/**
- * The offer from a given driver. Drivers left online by earlier tests may also be nearby,
- * so tests pick their own driver's offer explicitly.
- */
-async function offerOf(s: Setup, ride: { id: string; offers: { id: string }[] }, driver: Headers) {
-  const driverId = (await s.app.inject({ method: 'GET', url: '/drivers/me', headers: driver })).json().id;
-  const { rows } = await db.query(`SELECT id FROM ride_offers WHERE ride_id = $1 AND driver_id = $2`, [ride.id, driverId]);
-  const offer = ride.offers.find((o) => o.id === rows[0]?.id);
-  assert.ok(offer, 'the driver is offered');
-  return offer as { id: string; priceTiyin: number; [k: string]: unknown };
-}
-
-/** Ride created, driver chosen and accepted. */
-async function acceptedRide(s: Setup) {
-  const spot = randomSpot();
-  const driver = await onlineDriver(s, north(spot, 300));
-  const pax = await passenger(s);
-  const ride = (await createRide(s, pax, spot)).json();
-  const offer = await offerOf(s, ride, driver);
-  const chosen = await s.app.inject({ method: 'POST', url: `/rides/${ride.id}/choose`, headers: pax, payload: { offerId: offer.id } });
-  assert.equal(chosen.statusCode, 200, chosen.body);
-  const accepted = await s.app.inject({ method: 'POST', url: `/rides/${ride.id}/accept`, headers: driver });
-  assert.equal(accepted.statusCode, 200, accepted.body);
-  return { spot, driver, pax, rideId: ride.id as string, offer };
-}
 
 test('full ride: offer, choice, acceptance with locked price, status flow', { skip }, async () => {
   const s = await setup();
