@@ -10,7 +10,7 @@ const js = readdirSync(jsDir).filter((f) => f.endsWith('.js')).map((f) => readFi
 const tokens = JSON.parse(readFileSync(fileURLToPath(new URL('../../../packages/shared/design/tokens.json', import.meta.url)), 'utf8'));
 const tok = (name, mode) => tokens.color.tokens.find((t) => t.name === name).value[mode];
 
-const out = `<title>Taxi</title>
+const out = `<title>Taxi Passenger</title>
 <meta name="claude:viewport-fit-sides" content="cover">
 <style>
   :root { --page: ${tok('surface-page', 'light')}; --frame: ${tok('surface-sunken', 'light')}; }
