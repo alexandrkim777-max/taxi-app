@@ -2,30 +2,7 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { db, randomPhone, setup, skip } from './helpers.ts';
-
-type Setup = Awaited<ReturnType<typeof setup>>;
-
-async function verifiedDriver({ app, login }: Setup): Promise<Record<string, string>> {
-  const auth = { authorization: `Bearer ${await login(randomPhone())}` };
-  const driver = await app.inject({ method: 'POST', url: '/drivers/apply', headers: auth, payload: { name: 'Aziz' } });
-  const vehicle = await app.inject({
-    method: 'POST', url: '/drivers/me/vehicles', headers: auth,
-    payload: { makeModel: 'Chevrolet Cobalt', year: 2022, color: 'white', plate: '01A123BC' },
-  });
-  for (const type of ['passport', 'license', 'vehicle_registration', 'selfie', 'self_employed']) {
-    await app.inject({ method: 'POST', url: '/drivers/me/documents', headers: auth, payload: { type, fileUrl: `https://files.example/${type}.jpg` } });
-  }
-  const adminPhone = randomPhone();
-  const adminAuth = { authorization: `Bearer ${await login(adminPhone)}` };
-  await db.query(`UPDATE users SET roles = roles || ARRAY['admin'] WHERE phone = $1`, [adminPhone]);
-  const ok = await app.inject({
-    method: 'POST', url: `/admin/drivers/${driver.json().id}/approve`, headers: adminAuth,
-    payload: { vehicleId: vehicle.json().id, classCode: 'economy' },
-  });
-  assert.equal(ok.statusCode, 200, ok.body);
-  return auth;
-}
+import { randomPhone, setup, skip, verifiedDriver } from './helpers.ts';
 
 test('classes are public and carry the corridor', { skip }, async () => {
   const { app } = await setup();

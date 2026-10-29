@@ -3,6 +3,7 @@ import type pg from 'pg';
 import { clampToCorridor, fareTiyin, type Tariff } from '@taxi/shared';
 import { requireUser } from '../auth/session.ts';
 import type { RouteProvider } from '../routing/index.ts';
+import { uzPoint } from '../lib/geo.ts';
 
 const TARIFF_CHANGE_COOLDOWN_HOURS = 24;
 
@@ -41,18 +42,6 @@ function bounds(rec: number, c: ClassRow): { min: number; max: number } {
     max: Math.floor((rec * (100 + c.corridor_max_pct)) / 100),
   };
 }
-
-// Points must be inside Uzbekistan's bounding box (rough), so the API cannot be used
-// as a free routing service for arbitrary places.
-const point = {
-  type: 'object',
-  required: ['lat', 'lng'],
-  additionalProperties: false,
-  properties: {
-    lat: { type: 'number', minimum: 37.1, maximum: 45.6 },
-    lng: { type: 'number', minimum: 55.9, maximum: 73.2 },
-  },
-} as const;
 
 const tariffBody = {
   type: 'object',
@@ -154,7 +143,9 @@ export async function tariffRoutes(app: FastifyInstance, { db, routes, cityCode 
       }
 
       const last = await db.query<{ version: number; recent: boolean }>(
-        `SELECT version, created_at > now() - make_interval(hours => $3) AS recent
+        // Version 0 is the recommended tariff stored automatically on first going online;
+        // it does not count as the driver's own change.
+        `SELECT version, version > 0 AND created_at > now() - make_interval(hours => $3) AS recent
            FROM driver_tariffs WHERE driver_id = $1 AND class_id = $2
           ORDER BY version DESC LIMIT 1`,
         [found.driverId, found.cls.id, TARIFF_CHANGE_COOLDOWN_HOURS],
@@ -191,7 +182,7 @@ export async function tariffRoutes(app: FastifyInstance, { db, routes, cityCode 
           type: 'object',
           required: ['stops'],
           additionalProperties: false,
-          properties: { stops: { type: 'array', minItems: 2, maxItems: 5, items: point } },
+          properties: { stops: { type: 'array', minItems: 2, maxItems: 5, items: uzPoint } },
         },
       },
     },

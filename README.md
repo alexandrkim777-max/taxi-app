@@ -56,8 +56,33 @@ Tests: `npm test` (the API integration tests need a migrated database at `DATABA
 | GET | `/drivers/me/tariff` | verified driver | Current tariff (or recommended), allowed bounds per component |
 | PUT | `/drivers/me/tariff` | verified driver | New tariff version inside the corridor, at most once per 24 h |
 | POST | `/quotes` | user | Server-side route for 2–5 stops and the price range per class |
+| POST | `/drivers/me/online` | verified driver | Goes on the line (needs an active subscription) |
+| POST | `/drivers/me/location` | driver on the line | Position ping every 3–5 s |
+| POST | `/drivers/me/offline` | driver | Leaves the line (not during a ride) |
+| GET | `/drivers/me/requests` | driver | Rides where a passenger chose this driver; 30 s to accept |
+| POST | `/rides` | user | Creates a ride and returns nearby drivers, each at their own price |
+| POST | `/rides/:id/search` | passenger | Refreshes the offers |
+| POST | `/rides/:id/choose` | passenger | Chooses an offer |
+| POST | `/rides/:id/accept` | chosen driver | Accepts; the offer price is locked into the ride |
+| POST | `/rides/:id/decline` | chosen driver | Declines; not offered this ride again |
+| POST | `/rides/:id/status` | assigned driver | `driver_en_route` → `arrived` → `in_progress` → `completed` |
+| POST | `/rides/:id/cancel` | passenger or driver | Before the trip starts |
+| GET | `/rides/:id` | participants | Ride, stops, offers or assigned driver with live position |
+| GET | `/rides/active` | user | Current ride, to restore the app after a restart |
 
 Security measures: see [SECURITY.md](SECURITY.md).
+
+## How a ride is matched
+
+1. The driver goes on the line and sends their position every few seconds.
+2. The passenger creates a ride; the server routes it and finds up to 10 free drivers of the class
+   within their pickup radius (max 5 km), each priced by **their own tariff**, clamped into the corridor.
+3. The passenger sees model, colour, rating, distance and price — not the plate or exact position — and chooses.
+4. The chosen driver has 30 s to accept. On acceptance the price is copied into the ride and locked.
+5. The passenger then sees the plate and the driver's live position until the ride ends.
+
+Live positions sit in an `UNLOGGED` PostgreSQL table behind `apps/api/src/dispatch/presence.ts`,
+so they can move to Redis when load requires it without touching the ride logic.
 
 ## Principles (see the product spec)
 

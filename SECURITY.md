@@ -35,6 +35,24 @@ every item below has a regression test in `apps/api/test/security.test.ts` or th
   and can change at most once per 24 hours; every version is kept.
 - Moderation endpoints require the `admin` role.
 
+## Rides and dispatch
+
+- Only a ride's passenger and assigned driver can see or act on it; everyone else gets 404
+  (not 403), so ride ids cannot be probed.
+- Only the assigned driver moves the status forward, one allowed step at a time; the passenger cannot.
+- The price is never sent by the client: it comes from the chosen driver's stored tariff, clamped into the
+  corridor on the server, and is copied into the ride on acceptance. Later tariff changes do not affect it.
+- Before acceptance the passenger sees no plate and no exact driver position (distance rounded to 100 m);
+  pickup and destination are shown to a driver only after the passenger chooses them.
+- Live driver position is shown only to the ride's passenger and only while the ride is active.
+- Going online and accepting require a verified driver, an approved vehicle class, an active subscription
+  and no active block; blocked users cannot order. A driver is never offered their own order.
+- One active ride per passenger and per driver, enforced by unique indexes, so parallel requests
+  cannot create duplicates or let a driver accept two rides; covered by a race test.
+- Choices, acceptances and status changes run in transactions with row locks; every step is written to `ride_events`.
+- Abuse limits: 20 rides per passenger per hour, 10 ride requests and 20 searches per IP per minute,
+  40 position pings per session per minute; positions outside Uzbekistan are rejected.
+
 ## Errors
 
 - Internal errors return a generic `internal_error`; details go only to the server log.
@@ -58,3 +76,5 @@ The API refuses to start in production if:
 - Hosting in Uzbekistan, TLS, database backups and encryption at rest.
 - Admin actions audit log; 2FA for admin accounts.
 - Penetration test before the public launch.
+- Mask phone numbers between passenger and driver (call through a proxy number) before calls are added.
+- Encrypt the trip history at rest and set a retention period for raw positions.

@@ -7,6 +7,8 @@ import { loadUser } from './auth/session.ts';
 import { authRoutes } from './auth/routes.ts';
 import { driverRoutes } from './drivers/routes.ts';
 import { tariffRoutes } from './tariffs/routes.ts';
+import { dispatchRoutes } from './dispatch/routes.ts';
+import { rideRoutes } from './rides/routes.ts';
 
 export interface AppDeps {
   db: pg.Pool;
@@ -60,5 +62,7 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
   await app.register(authRoutes, { db: deps.db, sms: deps.sms, authSecret: deps.authSecret });
   await app.register(driverRoutes, { db: deps.db, fileBaseUrl: deps.fileBaseUrl, cityCode: deps.cityCode });
   await app.register(tariffRoutes, { db: deps.db, routes: deps.routes, cityCode: deps.cityCode });
+  await app.register(dispatchRoutes, { db: deps.db });
+  await app.register(rideRoutes, { db: deps.db, routes: deps.routes, cityCode: deps.cityCode });
   return app;
 }
