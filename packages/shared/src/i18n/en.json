@@ -1,0 +1,11 @@
+{
+  "order.button": "Order · {price} UZS",
+  "order.priceLocked": "Price won't change",
+  "pickup.title": "Where should we pick you up?",
+  "pickup.entrance": "Entrance",
+  "pickup.commentLabel": "Note for the driver",
+  "pickup.submit": "Pick up at entrance {entrance}",
+  "driver.online": "Online",
+  "driver.savings": "Kept instead of commission",
+  "subscription.renew": "Renew"
+}

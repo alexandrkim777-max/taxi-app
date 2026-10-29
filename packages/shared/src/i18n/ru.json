@@ -1,0 +1,11 @@
+{
+  "order.button": "Заказать · {price} сум",
+  "order.priceLocked": "Цена не изменится",
+  "pickup.title": "Откуда вас забрать?",
+  "pickup.entrance": "Подъезд",
+  "pickup.commentLabel": "Комментарий водителю",
+  "pickup.submit": "Подать к подъезду {entrance}",
+  "driver.online": "На линии",
+  "driver.savings": "Осталось у вас вместо комиссии",
+  "subscription.renew": "Продлить"
+}

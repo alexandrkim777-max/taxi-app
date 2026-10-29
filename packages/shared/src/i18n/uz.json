@@ -1,0 +1,11 @@
+{
+  "order.button": "Buyurtma berish · {price} so'm",
+  "order.priceLocked": "Narx o'zgarmaydi",
+  "pickup.title": "Sizni qayerdan olib ketamiz?",
+  "pickup.entrance": "Podyezd",
+  "pickup.commentLabel": "Haydovchiga izoh",
+  "pickup.submit": "{entrance}-podyezdga yuborish",
+  "driver.online": "Liniyada",
+  "driver.savings": "Komissiya o'rniga sizda qoldi",
+  "subscription.renew": "Uzaytirish"
+}
