@@ -42,11 +42,19 @@ export async function driverProfile(db: pg.Pool, driverId: string) {
   const present = new Set(documents.rows.map((d) => d.type));
   // Documents are private: only short-lived signed links leave the server.
   for (const d of documents.rows as { fileUrl?: string | null }[]) d.fileUrl = fileService().signedUrl(d.fileUrl ?? null);
+  // Why a document was sent back, so the driver knows what to re-take.
+  const rejections = await db.query<{ type: string; note: string }>(
+    `SELECT DISTINCT ON (type) type, note FROM driver_documents
+      WHERE driver_id = $1 AND status = 'rejected' AND note IS NOT NULL
+      ORDER BY type, reviewed_at DESC NULLS LAST`,
+    [driverId],
+  );
   return {
     ...driver.rows[0],
     vehicles: vehicles.rows,
     documents: documents.rows,
     missingDocuments: REQUIRED_DOCUMENTS.filter((t) => !present.has(t)),
+    rejections: rejections.rows.filter((r) => !present.has(r.type)),
   };
 }
 

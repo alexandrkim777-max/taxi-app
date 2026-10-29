@@ -454,3 +454,16 @@ test('one tap: a driver never holds two requests at once', { skip }, async () =>
   assert.deepEqual(states, ['searching', 'waiting_driver']);
   await s.app.close();
 });
+
+test('driver stats: today and this week, and what was kept vs a 20% commission', { skip }, async () => {
+  const s = await setup();
+  const r = await acceptedRide(s);
+  await drive(s, r.driver, r.rideId, ['driver_en_route', 'arrived', 'in_progress', 'completed']);
+  const stats = (await s.app.inject({ method: 'GET', url: '/drivers/me/stats', headers: r.driver })).json();
+  assert.equal(stats.today.rides, 1);
+  assert.equal(stats.today.earnedTiyin, r.offer.priceTiyin);
+  assert.equal(stats.today.keptVsCommissionTiyin, Math.round(r.offer.priceTiyin * 0.2));
+  assert.ok(stats.subscriptionUntil);
+  assert.equal((await s.app.inject({ method: 'GET', url: '/drivers/me/stats', headers: await passenger(s) })).statusCode, 404);
+  await s.app.close();
+});

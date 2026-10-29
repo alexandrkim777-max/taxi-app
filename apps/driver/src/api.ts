@@ -1,0 +1,79 @@
+// API client for the driver app. In the demo build (EXPO_PUBLIC_DEMO=1) every call is answered
+// by an in-app mock, so the whole flow can be clicked through without a server.
+
+import { getItem, setItem } from './storage';
+import { mockApi } from './mock';
+
+export const DEMO = process.env.EXPO_PUBLIC_DEMO === '1';
+const BASE = (process.env.EXPO_PUBLIC_API_URL ?? 'http://localhost:3000').replace(/\/$/, '');
+const TOKEN_KEY = 'session_token';
+let token: string | null = null;
+
+export async function loadToken(): Promise<string | null> {
+  token = DEMO ? token : await getItem(TOKEN_KEY);
+  return token;
+}
+
+export async function saveToken(t: string | null): Promise<void> {
+  token = t;
+  if (!DEMO) await setItem(TOKEN_KEY, t);
+}
+
+export function currentToken(): string | null {
+  return token;
+}
+
+export class ApiError extends Error {
+  status: number;
+  code: string;
+  body: Record<string, unknown>;
+  constructor(status: number, body: Record<string, unknown>) {
+    super(String(body.error ?? status));
+    this.status = status;
+    this.code = String(body.error ?? 'error');
+    this.body = body;
+  }
+}
+
+export async function api<T = unknown>(path: string, opts: { method?: string; body?: unknown } = {}): Promise<T> {
+  const method = opts.method ?? (opts.body === undefined ? 'GET' : 'POST');
+  if (DEMO) {
+    const res = await mockApi(method, path, opts.body);
+    if (res.status >= 400) throw new ApiError(res.status, res.body as Record<string, unknown>);
+    return res.body as T;
+  }
+  const res = await fetch(`${BASE}${path}`, {
+    method,
+    headers: {
+      ...(opts.body === undefined ? {} : { 'content-type': 'application/json' }),
+      ...(token ? { authorization: `Bearer ${token}` } : {}),
+    },
+    body: opts.body === undefined ? undefined : JSON.stringify(opts.body),
+  });
+  const text = await res.text();
+  const body = text ? JSON.parse(text) : {};
+  if (res.status === 401) await saveToken(null);
+  if (!res.ok) throw new ApiError(res.status, body);
+  return body as T;
+}
+
+/** Uploads a photo (from the camera or gallery) as the raw request body. */
+export async function uploadPhoto(path: string, uri: string): Promise<void> {
+  if (DEMO) {
+    await mockApi('POST', path, { uri });
+    return;
+  }
+  const blob = await (await fetch(uri)).blob();
+  const type = ['image/jpeg', 'image/png', 'image/webp', 'image/heic'].includes(blob.type) ? blob.type : 'image/jpeg';
+  const res = await fetch(`${BASE}${path}`, {
+    method: 'POST',
+    headers: { 'content-type': type, ...(token ? { authorization: `Bearer ${token}` } : {}) },
+    body: blob,
+  });
+  if (!res.ok) throw new ApiError(res.status, await res.json().catch(() => ({})));
+}
+
+export function errorText(err: unknown): string {
+  if (err instanceof ApiError) return err.code;
+  return err instanceof Error ? err.message : String(err);
+}

@@ -1,0 +1,31 @@
+{
+  "expo": {
+    "name": "Taxi Driver",
+    "slug": "taxi-driver",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "automatic",
+    "scheme": "taxidriver",
+    "platforms": ["ios", "android", "web"],
+    "ios": {
+      "bundleIdentifier": "uz.taxi.driver",
+      "supportsTablet": false,
+      "infoPlist": {
+        "NSLocationWhenInUseUsageDescription": "Passengers nearby see you only while you are on the line.",
+        "NSLocationAlwaysAndWhenInUseUsageDescription": "While you are on the line your position is sent so passengers can find you, also with the screen off.",
+        "NSCameraUsageDescription": "To photograph your documents for verification.",
+        "NSPhotoLibraryUsageDescription": "To choose photos of your documents for verification.",
+        "UIBackgroundModes": ["location"]
+      }
+    },
+    "android": {
+      "package": "uz.taxi.driver",
+      "permissions": ["ACCESS_FINE_LOCATION", "ACCESS_COARSE_LOCATION", "ACCESS_BACKGROUND_LOCATION", "FOREGROUND_SERVICE", "FOREGROUND_SERVICE_LOCATION", "CAMERA"]
+    },
+    "plugins": [
+      ["expo-location", { "isAndroidBackgroundLocationEnabled": true, "isAndroidForegroundServiceEnabled": true }],
+      "expo-secure-store"
+    ],
+    "web": { "bundler": "metro", "output": "single" }
+  }
+}

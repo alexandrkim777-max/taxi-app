@@ -13,7 +13,8 @@
     "typecheck": "npm run typecheck --workspaces --if-present",
     "db:migrate": "npm run migrate --workspace apps/api",
     "test": "npm test --workspaces --if-present",
-    "dev:admin": "npm run dev --workspace apps/admin"
+    "dev:admin": "npm run dev --workspace apps/admin",
+    "dev:driver": "cd apps/driver && npm install && npm start"
   },
   "engines": {
     "node": ">=22"

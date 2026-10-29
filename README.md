@@ -11,7 +11,8 @@ Working name — the brand name is not chosen yet.
 ```
 apps/
   api/        Backend (Node.js, TypeScript, Fastify)
-  mobile/     Passenger + driver app (React Native / Expo) — not scaffolded yet
+  driver/     Driver app (React Native / Expo SDK 51): sign-up, documents, the line, orders, rides, price, subscription
+  passenger/  Passenger app — next
   admin/      Staff panel (React + Vite): moderation, complaints, disputes, rides, prices, finance
 packages/
   shared/     Shared types, i18n strings (uz / ru / en), design tokens
@@ -84,7 +85,27 @@ Tests: `npm test` (the API integration tests need a migrated database at `DATABA
 | POST | `/payments/webhooks/:provider` | provider | Server-to-server payment notifications (verified per provider) |
 | POST | `/rides/:id/complaint` | participants | Complaint about the ride (rude, unsafe driving, asked for extra cash, …) |
 
-### Admin panel API
+### Driver app
+
+```bash
+cd apps/driver && npm install           # standalone install (Expo prefers its own node_modules)
+EXPO_PUBLIC_API_URL=http://<your-computer-ip>:3000 npm start   # open in Expo Go / a dev build
+npm run build:demo                      # clickable web demo with a pretend server
+```
+
+- Language first (uz / ru / en), SMS login, then name and car, document photos (camera), moderation.
+- The line: online switch, earnings today / this week and what was kept vs a 20% commission,
+  subscription days left. While online the position is sent every few seconds, also with the screen
+  off (background location with a visible notification, as the stores require).
+- Incoming order with a 15-second countdown, pickup distance, trip, passenger rating; the ride with
+  status buttons, free / paid waiting counter, cash to collect, Yandex / 2GIS / Google navigation,
+  cancel or no-show; rating the passenger with tags.
+- My price inside the corridor, subscription purchase through the payment provider's page.
+- Session token in the phone's secure storage (Keychain / Keystore). Theme follows the design tokens
+  and switches to night automatically after 19:00.
+- Background location and the camera need a development build (`npx expo run:android`); Expo Go covers the rest.
+
+## Admin panel API
 
 Roles: **admin** (everything) and **support** (moderation, complaints, disputes, lookups).
 Every action, including opening a dossier, is written to an append-only audit log.

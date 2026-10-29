@@ -133,6 +133,8 @@ test('driver dossier: phone, car, documents, numbers — staff only, and every v
   const rej = await s.app.inject({ method: 'POST', url: `/admin/drivers/${me.id}/documents/${doc.id}/reject`, headers: hdr(support), payload: { note: 'Photo is blurry' } });
   assert.equal(rej.statusCode, 200);
   assert.deepEqual(rej.json().missingDocuments, ['license']);
+  const own = (await s.app.inject({ method: 'GET', url: '/drivers/me', headers: driver })).json();
+  assert.deepEqual(own.rejections, [{ type: 'license', note: 'Photo is blurry' }], 'the driver sees why');
 
   // The audit log cannot be edited, not even directly in the database.
   await assert.rejects(db.query(`UPDATE admin_audit_log SET action = 'nothing' WHERE id = $1`, [log[0].id]), /append-only/);
