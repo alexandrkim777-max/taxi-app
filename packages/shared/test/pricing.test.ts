@@ -31,3 +31,16 @@ test('ride status transitions', () => {
   assert.equal(canTransition('created', 'completed'), false);
   assert.equal(canTransition('in_progress', 'cancelled'), false);
 });
+
+test('coefficient scales driver and reference fares alike', async () => {
+  const { driverPriceTiyin, scaledFareTiyin } = await import('../src/pricing.ts');
+  const rec = { baseTiyin: 500000, perKmTiyin: 180000, perMinTiyin: 25000, minFareTiyin: 1200000 };
+  const cheap = { baseTiyin: 400000, perKmTiyin: 144000, perMinTiyin: 20000, minFareTiyin: 960000 };
+  const route = { distanceM: 10000, durationS: 1200 };
+  const corridor = { minPct: -20, maxPct: 0 };
+  const base = driverPriceTiyin(cheap, rec, corridor, route, 1);
+  const up = driverPriceTiyin(cheap, rec, corridor, route, 1.2);
+  assert.ok(Math.abs(up - base * 1.2) <= 50000, 'about 20% more, rounded to 500 sum');
+  assert.ok(up <= scaledFareTiyin(rec, route, 1.2), 'never above the scaled reference');
+  assert.equal(up % 50000, 0);
+});

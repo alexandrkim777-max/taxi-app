@@ -11,7 +11,7 @@
 
 import type { FastifyInstance } from 'fastify';
 import type pg from 'pg';
-import { canTransition, clampToCorridor, fareTiyin, type RideStatus } from '@taxi/shared';
+import { canTransition, clampToCorridor, scaledFareTiyin, type RideStatus } from '@taxi/shared';
 import { requireUser } from '../auth/session.ts';
 import type { RouteProvider } from '../routing/index.ts';
 import type { PaymentService } from '../payments/service.ts';
@@ -129,7 +129,7 @@ export async function rideRoutes(app: FastifyInstance, { db, routes, cityCode, p
       }
 
       const cls = await db.query(
-        `SELECT vc.* FROM vehicle_classes vc JOIN cities c ON c.id = vc.city_id
+        `SELECT vc.*, current_price_coefficient(vc.id) AS coefficient FROM vehicle_classes vc JOIN cities c ON c.id = vc.city_id
           WHERE c.code = $1 AND vc.code = $2 AND vc.deleted_at IS NULL`,
         [cityCode, request.body.classCode],
       );
@@ -148,10 +148,10 @@ export async function rideRoutes(app: FastifyInstance, { db, routes, cityCode, p
       // The ceiling only filters drivers; it never sets anyone's price. It must still be a price
       // that can exist for this route, otherwise the ride could never be served.
       if (mode === 'auto') {
-        const reference = fareTiyin({
+        const reference = scaledFareTiyin({
           baseTiyin: Number(c.rec_base_tiyin), perKmTiyin: Number(c.rec_per_km_tiyin),
           perMinTiyin: Number(c.rec_per_min_tiyin), minFareTiyin: Number(c.rec_min_fare_tiyin),
-        }, route);
+        }, route, Number(c.coefficient));
         const floor = clampToCorridor(0, reference, { minPct: c.corridor_min_pct, maxPct: c.corridor_max_pct });
         const max = request.body.maxPriceTiyin!;
         if (max < floor || max > reference) {
@@ -164,13 +164,14 @@ export async function rideRoutes(app: FastifyInstance, { db, routes, cityCode, p
         rideId = await withTx(db, async (tx) => {
           const { rows } = await tx.query<{ id: string }>(
             `INSERT INTO rides (city_id, passenger_id, class_id, route_distance_m, route_duration_s, options,
-                                driver_comment, dispatch_mode, max_price_tiyin, search_deadline, payment_method, card_id)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, now() + make_interval(secs => $10), $11, $12) RETURNING id`,
+                                driver_comment, dispatch_mode, max_price_tiyin, search_deadline, payment_method, card_id,
+                                price_coefficient)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, now() + make_interval(secs => $10), $11, $12, $13) RETURNING id`,
             [
               c.city_id, userId, c.id, route.distanceM, route.durationS,
               JSON.stringify(request.body.options ?? {}), request.body.comment ?? null,
               mode, mode === 'auto' ? request.body.maxPriceTiyin : null, SEARCH_WINDOW_SEC,
-              paymentMethod, cardId,
+              paymentMethod, cardId, c.coefficient,
             ],
           );
           const id = rows[0]!.id;

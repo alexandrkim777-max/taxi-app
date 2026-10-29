@@ -49,9 +49,9 @@ Tests: `npm test` (the API integration tests need a migrated database at `DATABA
 | GET | `/drivers/me` | driver | Profile, vehicles, documents, missing document types |
 | POST | `/drivers/me/vehicles` | driver | Adds a car; the class is set by a moderator |
 | POST | `/drivers/me/documents` | driver | Uploads a document link; replaces the previous one of that type |
-| GET | `/admin/drivers?status=pending` | admin | Moderation queue |
-| POST | `/admin/drivers/:id/approve` | admin | Assigns the class, approves documents, starts the free trial month |
-| POST | `/admin/drivers/:id/reject` | admin | Rejects with a reason the driver sees |
+| GET | `/admin/drivers?status=pending` | staff | Moderation queue |
+| POST | `/admin/drivers/:id/approve` | staff | Assigns the class, approves documents, starts the free trial month |
+| POST | `/admin/drivers/:id/reject` | staff | Rejects with a reason the driver sees |
 | GET | `/classes` | anyone | Vehicle classes with recommended tariff and price corridor |
 | GET | `/drivers/me/tariff` | verified driver | Current tariff (or recommended), allowed bounds per component |
 | PUT | `/drivers/me/tariff` | verified driver | New tariff version inside the corridor, at most once per 24 h |
@@ -81,6 +81,33 @@ Tests: `npm test` (the API integration tests need a migrated database at `DATABA
 | POST | `/me/cards/:id/default` | user | Default card |
 | GET | `/me/debts`, POST `/me/debts/pay` | user | Unpaid card rides and cancellation fees; settle them with a card |
 | POST | `/payments/webhooks/:provider` | provider | Server-to-server payment notifications (verified per provider) |
+| POST | `/rides/:id/complaint` | participants | Complaint about the ride (rude, unsafe driving, asked for extra cash, …) |
+
+### Admin panel API
+
+Roles: **admin** (everything) and **support** (moderation, complaints, disputes, lookups).
+Every action, including opening a dossier, is written to an append-only audit log.
+
+| Method | Path | Who | What |
+| --- | --- | --- | --- |
+| GET | `/admin/dashboard` | staff | Drivers online / on a ride, active rides, today's numbers, queues, coefficients |
+| GET | `/admin/search?q=` | staff | By phone, plate or name |
+| GET | `/admin/drivers/:id/dossier` | staff | Phone, car(s), documents, subscription, ratings and tags, rides, complaints, blocks |
+| POST | `/admin/drivers/:id/documents/:docId/reject` | staff | Document must be uploaded again (with a note) |
+| POST | `/admin/drivers/:id/vehicles/:vehicleId/class` | staff | Change a car's class |
+| GET | `/admin/users/:id` | staff | Passenger profile |
+| POST | `/admin/users/:id/block`, `/unblock` | staff | With a reason, optionally for N days; drivers leave the map at once |
+| PUT | `/admin/users/:id/roles` | admin | Staff roles (an admin cannot remove their own) |
+| GET | `/admin/complaints`, `/admin/complaints/:id` | staff | Queue (safety first) and details with the ride log |
+| POST | `/admin/complaints/:id/assign`, `/resolve` | staff | Resolve or reject; optionally warn or block |
+| GET | `/admin/rides?phone=&status=`, `/admin/rides/:id` | staff | Ride lookup with route, price changes, payments, ratings, complaints, dispute, log |
+| GET | `/admin/pricing` | staff | Effective coefficient per class, tariffs, fees, plans |
+| POST | `/admin/pricing/coefficients` | admin | Raise / lower prices: city or one class, 0.70–1.50, reason required, optional time window |
+| POST | `/admin/pricing/coefficients/:id/end` | admin | End or cancel a coefficient rule |
+| PUT | `/admin/pricing/classes/:code` | admin | Recommended tariff, cancellation fee, waiting |
+| PUT | `/admin/pricing/plans/:code` | admin | Subscription price / availability |
+| GET | `/admin/finance?days=` | admin | Payments by type, debts, refunds to send |
+| GET | `/admin/audit` | admin | Who did what |
 | GET | `/rides/:id` | participants | Ride, stops, offers or assigned driver with live position |
 | GET | `/rides/active` | user | Current ride, to restore the app after a restart |
 | POST | `/rides/:id/route/preview` | passenger | New price for added / removed / changed stops; nothing changes yet |
@@ -139,6 +166,8 @@ development uses the `fake` provider (test page at `/dev/payments/:id`; card tok
 
 ## Principles (see the product spec)
 
+- A general price coefficient (0.70–1.50, city or class, optional time window) is set by admins with a
+  reason; it applies to new orders only, is stored on each ride, and is returned openly in quotes.
 - Ride price is locked at acceptance. It changes **only** through (a) the passenger adding, removing or
   changing a stop and confirming the new price, or (b) paid waiting at the pickup: 2 free minutes, then the
   published class rate per minute (economy 500 sum), at most 30 minutes, shown live as a counter.

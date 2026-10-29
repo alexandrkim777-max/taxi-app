@@ -105,6 +105,18 @@ every item below has a regression test in `apps/api/test/security.test.ts` or th
 - Cards are owner-only; a card in use by an active ride cannot be removed; at most 5 cards per user.
 - Production refuses to start with the `fake` provider enabled.
 
+## Admin panel
+
+- Two staff roles: `admin` (everything) and `support` (moderation, complaints, disputes, lookups).
+  Prices, fees, plans, finance, staff roles and the audit log are admin-only.
+- Every staff action, including viewing a dossier, a ride or a phone search, is written to
+  `admin_audit_log` with the staff member and IP. A database trigger makes the log append-only.
+- Role changes take effect on the next request; an admin cannot remove their own admin role,
+  nobody can block themselves.
+- The price coefficient is bounded (0.70–1.50) by a database check, requires a reason, applies to
+  new orders only and is stored on each ride, so a later change never alters an existing price.
+- Blocking a driver removes them from the map at once; blocks carry a reason and are lifted with one.
+
 ## Errors
 
 - Internal errors return a generic `internal_error`; details go only to the server log.
@@ -127,7 +139,7 @@ The API refuses to start in production if:
 - Payme / Click / Uzum adapters (webhook auth, checkout, card tokens), fiscal operator, driver payouts, refunds.
 - File storage with signed upload URLs and image type checks.
 - Hosting in Uzbekistan, TLS, database backups and encryption at rest.
-- Admin actions audit log; 2FA for admin accounts.
+- 2FA for staff accounts; staff panel only from allowed networks / VPN.
 - Penetration test before the public launch.
 - Mask phone numbers between passenger and driver (call through a proxy number) before calls are added.
 - Encrypt the trip history at rest and set a retention period for raw positions.

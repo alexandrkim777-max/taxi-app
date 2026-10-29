@@ -46,3 +46,19 @@ export function requireRole(role: string) {
     }
   };
 }
+
+/** Staff roles: 'admin' can do everything; 'support' handles moderation, complaints and disputes. */
+export const STAFF_ROLES = ['admin', 'support'] as const;
+
+export function requireAnyRole(roles: readonly string[]) {
+  return async (request: FastifyRequest, reply: FastifyReply): Promise<void> => {
+    if (!request.user) {
+      await reply.code(401).send({ error: 'unauthorized' });
+    } else if (!request.user.roles.some((r) => roles.includes(r))) {
+      await reply.code(403).send({ error: 'forbidden' });
+    }
+  };
+}
+
+export const requireStaff = requireAnyRole(STAFF_ROLES);
+export const requireAdmin = requireAnyRole(['admin']);

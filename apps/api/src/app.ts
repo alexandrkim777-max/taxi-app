@@ -14,6 +14,10 @@ import { routeChangeRoutes } from './rides/changes.ts';
 import { disputeRoutes } from './disputes/routes.ts';
 import { ratingRoutes } from './ratings/routes.ts';
 import { paymentRoutes } from './payments/routes.ts';
+import { complaintRoutes } from './complaints/routes.ts';
+import { adminPeopleRoutes } from './admin/people.ts';
+import { adminPricingRoutes } from './admin/pricing.ts';
+import { adminOpsRoutes } from './admin/ops.ts';
 import type { PaymentService } from './payments/service.ts';
 import type { ProviderName } from './payments/types.ts';
 
@@ -81,6 +85,10 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
   await app.register(routeChangeRoutes, { db: deps.db, routes: deps.routes });
   await app.register(disputeRoutes, { db: deps.db });
   await app.register(ratingRoutes, { db: deps.db });
+  await app.register(complaintRoutes, { db: deps.db });
+  await app.register(adminPeopleRoutes, { db: deps.db, cityCode: deps.cityCode });
+  await app.register(adminPricingRoutes, { db: deps.db, cityCode: deps.cityCode });
+  await app.register(adminOpsRoutes, { db: deps.db, cityCode: deps.cityCode });
   await app.register(paymentRoutes, {
     payments: deps.payments,
     cityCode: deps.cityCode,

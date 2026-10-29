@@ -42,3 +42,23 @@ export function roundToSum(tiyin: number, stepSum = 500): number {
   const step = stepSum * 100;
   return Math.round(tiyin / step) * step;
 }
+
+/**
+ * Applies the general price coefficient (set by staff, e.g. 1.10) to a fare, rounded to 500 sum.
+ * The coefficient scales the reference fare and every driver's fare alike, so the corridor
+ * (driver at most the reference, at least -20%) keeps its meaning.
+ */
+export function scaledFareTiyin(tariff: Tariff, route: RouteEstimate, coefficient = 1): number {
+  return roundToSum(fareTiyin(tariff, route) * coefficient);
+}
+
+/** A driver's price for a route: own tariff, times the coefficient, clamped into the corridor. */
+export function driverPriceTiyin(
+  driverTariff: Tariff, recommended: Tariff, corridor: Corridor, route: RouteEstimate, coefficient = 1,
+): number {
+  return clampToCorridor(
+    scaledFareTiyin(driverTariff, route, coefficient),
+    scaledFareTiyin(recommended, route, coefficient),
+    corridor,
+  );
+}

@@ -9,7 +9,8 @@
 
 import type { FastifyInstance } from 'fastify';
 import type pg from 'pg';
-import { requireRole, requireUser } from '../auth/session.ts';
+import { requireStaff, requireUser } from '../auth/session.ts';
+import { audit } from '../admin/audit.ts';
 import { uuidParams } from '../lib/geo.ts';
 import { HttpError, isUniqueViolation, withTx } from '../lib/tx.ts';
 import { logEvent } from '../dispatch/matching.ts';
@@ -187,7 +188,7 @@ export async function disputeRoutes(app: FastifyInstance, { db }: Deps): Promise
   app.get<{ Querystring: { status?: string } }>(
     '/admin/disputes',
     {
-      preHandler: requireRole('admin'),
+      preHandler: requireStaff,
       schema: {
         querystring: {
           type: 'object', additionalProperties: false,
@@ -213,11 +214,12 @@ export async function disputeRoutes(app: FastifyInstance, { db }: Deps): Promise
 
   app.get<{ Params: { id: string } }>(
     '/admin/disputes/:id',
-    { preHandler: requireRole('admin'), schema: { params: uuidParams } },
+    { preHandler: requireStaff, schema: { params: uuidParams } },
     async (request) => {
       const { rows } = await db.query<DisputeRow & { ride_id: string }>(`SELECT * FROM disputes WHERE id = $1`, [request.params.id]);
       const d = rows[0];
       if (!d) throw new HttpError(404, 'not_found');
+      await audit(db, request, 'dispute_viewed', { type: 'dispute', id: d.id });
       const ride = await db.query(
         `SELECT r.id, r.status, r.locked_price_tiyin::int AS "priceTiyin", r.route_distance_m AS "distanceM",
                 r.cancelled_by AS "cancelledBy", r.cancel_reason AS "cancelReason", r.created_at AS "createdAt",
@@ -258,7 +260,7 @@ export async function disputeRoutes(app: FastifyInstance, { db }: Deps): Promise
   app.post<{ Params: { id: string }; Body: { outcome: string; resolution: string; waiveCancelFee?: boolean } }>(
     '/admin/disputes/:id/resolve',
     {
-      preHandler: requireRole('admin'),
+      preHandler: requireStaff,
       schema: {
         params: uuidParams,
         body: {
@@ -299,6 +301,9 @@ export async function disputeRoutes(app: FastifyInstance, { db }: Deps): Promise
           waived = true;
         }
         await logEvent(tx, d.ride_id, 'dispute_resolved', 'admin', adminId, { outcome: request.body.outcome, feeWaived: waived });
+        await audit(tx, request, 'dispute_resolved', { type: 'dispute', id: request.params.id }, {
+          outcome: request.body.outcome, feeWaived: waived,
+        });
       });
       return { status: 'resolved' };
     },

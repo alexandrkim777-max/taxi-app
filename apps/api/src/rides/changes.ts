@@ -8,7 +8,7 @@
 
 import type { FastifyInstance } from 'fastify';
 import type pg from 'pg';
-import { clampToCorridor, fareTiyin, type RideStatus } from '@taxi/shared';
+import { driverPriceTiyin, type RideStatus } from '@taxi/shared';
 import { requireUser } from '../auth/session.ts';
 import type { RouteProvider, RouteResult } from '../routing/index.ts';
 import { haversineM, uuidParams } from '../lib/geo.ts';
@@ -66,7 +66,7 @@ export async function routeChangeRoutes(app: FastifyInstance, { db, routes }: De
     const { rows } = await db.query(
       `SELECT r.locked_price_tiyin, t.base_tiyin, t.per_km_tiyin, t.per_min_tiyin, t.min_fare_tiyin,
               vc.rec_base_tiyin, vc.rec_per_km_tiyin, vc.rec_per_min_tiyin, vc.rec_min_fare_tiyin,
-              vc.corridor_min_pct, vc.corridor_max_pct,
+              vc.corridor_min_pct, vc.corridor_max_pct, r.price_coefficient,
               (SELECT count(*)::int FROM price_changes pc WHERE pc.ride_id = r.id) AS changes,
               (SELECT json_agg(json_build_object('lat', ST_Y(s.point::geometry), 'lng', ST_X(s.point::geometry),
                                                  'address', s.address) ORDER BY s.position)
@@ -97,13 +97,11 @@ export async function routeChangeRoutes(app: FastifyInstance, { db, routes }: De
       baseTiyin: Number(r.base_tiyin), perKmTiyin: Number(r.per_km_tiyin),
       perMinTiyin: Number(r.per_min_tiyin), minFareTiyin: Number(r.min_fare_tiyin),
     };
-    const reference = fareTiyin({
+    // Same driver tariff and the same coefficient as when the ride was ordered.
+    const newPriceTiyin = driverPriceTiyin(driverTariff, {
       baseTiyin: Number(r.rec_base_tiyin), perKmTiyin: Number(r.rec_per_km_tiyin),
       perMinTiyin: Number(r.rec_per_min_tiyin), minFareTiyin: Number(r.rec_min_fare_tiyin),
-    }, route);
-    const newPriceTiyin = clampToCorridor(fareTiyin(driverTariff, route), reference, {
-      minPct: r.corridor_min_pct, maxPct: r.corridor_max_pct,
-    });
+    }, { minPct: r.corridor_min_pct, maxPct: r.corridor_max_pct }, route, Number(r.price_coefficient));
     const reason = stops.length > oldStops.length ? 'stop_added'
       : stops.length < oldStops.length ? 'stop_removed' : 'address_changed';
     return { oldPriceTiyin: Number(r.locked_price_tiyin), newPriceTiyin, route, reason, oldStops };

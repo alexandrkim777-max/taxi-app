@@ -1,6 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import type pg from 'pg';
-import { clampToCorridor, fareTiyin, type Tariff } from '@taxi/shared';
+import { clampToCorridor, scaledFareTiyin, type Tariff } from '@taxi/shared';
 import { requireUser } from '../auth/session.ts';
 import type { RouteProvider } from '../routing/index.ts';
 import { uzPoint } from '../lib/geo.ts';
@@ -26,6 +26,7 @@ interface ClassRow {
   rec_min_fare_tiyin: string;
   corridor_min_pct: number;
   corridor_max_pct: number;
+  coefficient: string;
 }
 
 function recommended(c: ClassRow): Tariff {
@@ -60,7 +61,7 @@ const tariffBody = {
 export async function tariffRoutes(app: FastifyInstance, { db, routes, cityCode }: Deps): Promise<void> {
   async function cityClasses(): Promise<ClassRow[]> {
     const { rows } = await db.query<ClassRow>(
-      `SELECT vc.* FROM vehicle_classes vc JOIN cities c ON c.id = vc.city_id
+      `SELECT vc.*, current_price_coefficient(vc.id) AS coefficient FROM vehicle_classes vc JOIN cities c ON c.id = vc.city_id
         WHERE c.code = $1 AND vc.deleted_at IS NULL ORDER BY vc.rec_base_tiyin`,
       [cityCode],
     );
@@ -202,7 +203,8 @@ export async function tariffRoutes(app: FastifyInstance, { db, routes, cityCode 
       return {
         route,
         classes: await Promise.all(classes.map(async (c) => {
-          const rec = fareTiyin(recommended(c), route);
+          const coefficient = Number(c.coefficient);
+          const rec = scaledFareTiyin(recommended(c), route, coefficient);
           const corridor = { minPct: c.corridor_min_pct, maxPct: c.corridor_max_pct };
           // Price range drivers of this class can charge for this route.
           const floor = clampToCorridor(0, rec, corridor);
@@ -210,11 +212,13 @@ export async function tariffRoutes(app: FastifyInstance, { db, routes, cityCode 
           // The app shows it on the "Order" button and sends it back as the ceiling.
           const drivers = await pricedDrivers(db, {
             lat: pickup.lat, lng: pickup.lng, route, excludeUserId: request.user!.id,
-            cls: { classId: c.id, recommended: recommended(c), corridor },
+            cls: { classId: c.id, recommended: recommended(c), corridor, coefficient },
           });
           const best = bestOf(drivers);
           return {
             code: c.code, name: pick(c.name, langOf(request)), seats: c.seats, maxFareTiyin: rec, minFareTiyin: floor,
+            // Shown openly in the app when it is not 1 (honest pricing).
+            coefficient,
             best: best ? { priceTiyin: best.priceTiyin, pickupMin: pickupMin(best.distanceM) } : null,
             driversNearby: drivers.length,
           };

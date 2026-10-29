@@ -6,7 +6,7 @@
 // next one when a driver declines or lets the request lapse.
 
 import type pg from 'pg';
-import { clampToCorridor, fareTiyin, type RouteEstimate, type Tariff } from '@taxi/shared';
+import { driverPriceTiyin, type RouteEstimate, type Tariff } from '@taxi/shared';
 import { nearbyDrivers, PRESENCE_TTL_SEC } from './presence.ts';
 
 type Q = pg.Pool | pg.PoolClient;
@@ -46,6 +46,8 @@ export interface ClassPricing {
   classId: string;
   recommended: Tariff;
   corridor: { minPct: number; maxPct: number };
+  /** General price coefficient set by staff (1 = normal). */
+  coefficient: number;
 }
 
 export interface PricedDriver {
@@ -64,13 +66,12 @@ export async function pricedDrivers(
   const drivers = await nearbyDrivers(q, {
     lat: opts.lat, lng: opts.lng, classId: opts.cls.classId, excludeUserId: opts.excludeUserId, limit: MAX_OFFERS,
   });
-  const reference = fareTiyin(opts.cls.recommended, opts.route);
   return drivers.map((d) => ({
     driverId: d.driverId,
     tariffId: d.tariffId,
     distanceM: d.distanceM,
     rating: d.rating,
-    priceTiyin: clampToCorridor(fareTiyin(d, opts.route), reference, opts.cls.corridor),
+    priceTiyin: driverPriceTiyin(d, opts.cls.recommended, opts.cls.corridor, opts.route, opts.cls.coefficient),
   }));
 }
 
@@ -96,6 +97,7 @@ interface RideForSearch {
   rec_min_fare_tiyin: string;
   corridor_min_pct: number;
   corridor_max_pct: number;
+  price_coefficient: string;
 }
 
 /**
@@ -107,7 +109,7 @@ export async function refreshOffers(q: Q, rideId: string): Promise<void> {
     `SELECT r.passenger_id, r.route_distance_m, r.route_duration_s, r.class_id,
             ST_Y(s.point::geometry) AS lat, ST_X(s.point::geometry) AS lng,
             vc.rec_base_tiyin, vc.rec_per_km_tiyin, vc.rec_per_min_tiyin, vc.rec_min_fare_tiyin,
-            vc.corridor_min_pct, vc.corridor_max_pct
+            vc.corridor_min_pct, vc.corridor_max_pct, r.price_coefficient
        FROM rides r
        JOIN ride_stops s ON s.ride_id = r.id AND s.position = 0
        JOIN vehicle_classes vc ON vc.id = r.class_id
@@ -125,6 +127,8 @@ export async function refreshOffers(q: Q, rideId: string): Promise<void> {
         perMinTiyin: Number(r.rec_per_min_tiyin), minFareTiyin: Number(r.rec_min_fare_tiyin),
       },
       corridor: { minPct: r.corridor_min_pct, maxPct: r.corridor_max_pct },
+      // The coefficient in force when the ride was ordered, so the price the passenger saw holds.
+      coefficient: Number(r.price_coefficient),
     },
   });
 

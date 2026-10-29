@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import type pg from 'pg';
-import { requireRole, requireUser } from '../auth/session.ts';
+import { requireStaff, requireUser } from '../auth/session.ts';
+import { audit } from '../admin/audit.ts';
 
 export const REQUIRED_DOCUMENTS = ['passport', 'license', 'vehicle_registration', 'selfie', 'self_employed'] as const;
 
@@ -20,7 +21,7 @@ async function driverIdFor(db: pg.Pool, userId: string): Promise<string | null> 
 }
 
 /** Driver profile with vehicles, current documents and the document types still missing. */
-async function driverProfile(db: pg.Pool, driverId: string) {
+export async function driverProfile(db: pg.Pool, driverId: string) {
   const driver = await db.query(
     `SELECT d.id, d.status, d.rating, d.languages, d.pickup_radius_m, d.verified_at, u.name, u.phone
        FROM drivers d JOIN users u ON u.id = d.user_id WHERE d.id = $1`,
@@ -161,7 +162,7 @@ export async function driverRoutes(app: FastifyInstance, { db, fileBaseUrl, city
   app.get<{ Querystring: { status?: string } }>(
     '/admin/drivers',
     {
-      preHandler: requireRole('admin'),
+      preHandler: requireStaff,
       schema: {
         querystring: {
           type: 'object',
@@ -181,7 +182,7 @@ export async function driverRoutes(app: FastifyInstance, { db, fileBaseUrl, city
   app.post<{ Params: { id: string }; Body: { vehicleId: string; classCode: string } }>(
     '/admin/drivers/:id/approve',
     {
-      preHandler: requireRole('admin'),
+      preHandler: requireStaff,
       schema: {
       params: { type: 'object', properties: { id: { type: 'string', pattern: '^[0-9a-f-]{36}$' } } },
         body: {
@@ -240,6 +241,9 @@ export async function driverRoutes(app: FastifyInstance, { db, fileBaseUrl, city
               AND NOT EXISTS (SELECT 1 FROM subscriptions s WHERE s.driver_id = $1)`,
           [driverId, cls.rows[0].city_id],
         );
+        await audit(client, request, 'driver_approved', { type: 'driver', id: driverId }, {
+          vehicleId: request.body.vehicleId, classCode: request.body.classCode,
+        });
         await client.query('COMMIT');
       } catch (err) {
         await client.query('ROLLBACK');
@@ -254,7 +258,7 @@ export async function driverRoutes(app: FastifyInstance, { db, fileBaseUrl, city
   app.post<{ Params: { id: string }; Body: { reason: string } }>(
     '/admin/drivers/:id/reject',
     {
-      preHandler: requireRole('admin'),
+      preHandler: requireStaff,
       schema: {
       params: { type: 'object', properties: { id: { type: 'string', pattern: '^[0-9a-f-]{36}$' } } },
         body: {
@@ -276,6 +280,7 @@ export async function driverRoutes(app: FastifyInstance, { db, fileBaseUrl, city
           WHERE driver_id = $1 AND deleted_at IS NULL AND status = 'pending'`,
         [request.params.id, request.body.reason, request.user!.id],
       );
+      await audit(db, request, 'driver_rejected', { type: 'driver', id: request.params.id }, { reason: request.body.reason });
       return driverProfile(db, request.params.id);
     },
   );
