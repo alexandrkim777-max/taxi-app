@@ -311,6 +311,12 @@ test('cancel: driver no-show only after waiting 5 minutes; plain driver cancel i
   assert.equal(paxNoShow.statusCode, 400);
 
   await db.query(`UPDATE ride_events SET at = now() - interval '6 minutes' WHERE ride_id = $1 AND type = 'status:arrived'`, [r.rideId]);
+  // Driving off and then claiming a no-show does not work.
+  await s.app.inject({ method: 'POST', url: '/drivers/me/location', headers: r.driver, payload: north(r.spot, 500) });
+  const gone = await s.app.inject({ method: 'POST', url: `/rides/${r.rideId}/cancel`, headers: r.driver, payload: { noShow: true } });
+  assert.equal(gone.statusCode, 409);
+  assert.equal(gone.json().error, 'not_at_pickup');
+  await s.app.inject({ method: 'POST', url: '/drivers/me/location', headers: r.driver, payload: r.spot });
   const noShow = await s.app.inject({ method: 'POST', url: `/rides/${r.rideId}/cancel`, headers: r.driver, payload: { noShow: true } });
   assert.equal(noShow.statusCode, 200, noShow.body);
   assert.equal(noShow.json().cancelReason, 'no_show');

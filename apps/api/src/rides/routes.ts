@@ -448,6 +448,20 @@ export async function rideRoutes(app: FastifyInstance, { db, routes, cityCode }:
         if (role === 'passenger' && terms.feeTiyin > 0 && body.acceptFeeTiyin !== terms.feeTiyin) {
           throw new HttpError(409, 'fee_confirmation_required', { feeTiyin: terms.feeTiyin });
         }
+        // A no-show is accepted only from a driver still at the pickup (as Yandex requires),
+        // not from one who already drove off.
+        if (body.noShow) {
+          const { rows } = await tx.query<{ distance_m: number }>(
+            `SELECT ST_Distance(p.point, s.point)::int AS distance_m
+               FROM driver_presence p JOIN ride_stops s ON s.ride_id = $1 AND s.position = 0
+              WHERE p.driver_id = $2 AND p.updated_at > now() - make_interval(secs => $3)`,
+            [ride.id, ride.driver_id, PRESENCE_TTL_SEC],
+          );
+          const distanceM = rows[0]?.distance_m;
+          if (distanceM === undefined || distanceM > ARRIVAL_RADIUS_M) {
+            throw new HttpError(409, 'not_at_pickup', { distanceM: distanceM ?? null, maxDistanceM: ARRIVAL_RADIUS_M });
+          }
+        }
         const fee = terms.feeTiyin > 0 ? terms.feeTiyin : null;
         await tx.query(
           `UPDATE rides SET status = 'cancelled', cancelled_by = $2, cancel_reason = $3,
