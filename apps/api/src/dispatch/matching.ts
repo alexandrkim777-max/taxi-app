@@ -10,6 +10,7 @@
 import type pg from 'pg';
 import { driverPriceTiyin, type RouteEstimate, type Tariff } from '@taxi/shared';
 import { nearbyDrivers, PRESENCE_TTL_SEC } from './presence.ts';
+import { enqueueForEvent } from '../push/outbox.ts';
 
 type Q = pg.Pool | pg.PoolClient;
 
@@ -185,12 +186,14 @@ export async function refreshOffers(q: Q, rideId: string): Promise<void> {
 }
 
 export async function logEvent(
-  q: Q, rideId: string, type: string, actor: 'passenger' | 'driver' | 'system' | 'admin', actorId: string | null, payload = {},
+  q: Q, rideId: string, type: string, actor: 'passenger' | 'driver' | 'system' | 'admin', actorId: string | null, payload: Record<string, unknown> = {},
 ): Promise<void> {
   await q.query(
     `INSERT INTO ride_events (ride_id, type, actor, actor_id, payload) VALUES ($1, $2, $3, $4, $5)`,
     [rideId, type, actor, actorId, JSON.stringify(payload)],
   );
+  // Same transaction: the notification exists only if the event does.
+  await enqueueForEvent(q, rideId, type, actor, payload);
 }
 
 /** Marks requests a driver let lapse as missed (never re-offered for this ride) and logs them. */

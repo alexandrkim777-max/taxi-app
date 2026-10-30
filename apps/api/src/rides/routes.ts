@@ -99,6 +99,19 @@ export async function rideRoutes(app: FastifyInstance, { db, routes, cityCode, p
     },
     async (request, reply) => {
       const userId = request.user!.id;
+      // A retry of an order whose answer was lost (bad mobile network): the same ride, not a second one.
+      const idemHeader = request.headers['idempotency-key'];
+      const idemKey = typeof idemHeader === 'string' ? idemHeader.trim().toLowerCase() : null;
+      if (idemKey !== null && !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(idemKey)) {
+        return reply.code(400).send({ error: 'invalid_idempotency_key' });
+      }
+      const sameOrder = async () => {
+        if (!idemKey) return null;
+        const { rows } = await db.query<{ id: string }>(`SELECT id FROM rides WHERE passenger_id = $1 AND idempotency_key = $2`, [userId, idemKey]);
+        return rows[0] ? rideView(db, rows[0].id, 'passenger') : null;
+      };
+      const earlier = await sameOrder();
+      if (earlier) return reply.code(200).send(earlier);
       const mode = request.body.mode ?? 'auto';
       if (mode === 'auto' && request.body.maxPriceTiyin === undefined) {
         return reply.code(400).send({ error: 'max_price_required' });
@@ -172,13 +185,13 @@ export async function rideRoutes(app: FastifyInstance, { db, routes, cityCode, p
           const { rows } = await tx.query<{ id: string }>(
             `INSERT INTO rides (city_id, passenger_id, class_id, route_distance_m, route_duration_s, options,
                                 driver_comment, dispatch_mode, max_price_tiyin, search_deadline, payment_method, card_id,
-                                price_coefficient, priority)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, now() + make_interval(secs => $10), $11, $12, $13, $14) RETURNING id`,
+                                price_coefficient, priority, idempotency_key)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, now() + make_interval(secs => $10), $11, $12, $13, $14, $15) RETURNING id`,
             [
               c.city_id, userId, c.id, route.distanceM, route.durationS,
               JSON.stringify(request.body.options ?? {}), request.body.comment ?? null,
               mode, mode === 'auto' ? request.body.maxPriceTiyin : null, SEARCH_WINDOW_SEC,
-              paymentMethod, cardId, c.coefficient, priority,
+              paymentMethod, cardId, c.coefficient, priority, idemKey,
             ],
           );
           const id = rows[0]!.id;
@@ -189,6 +202,11 @@ export async function rideRoutes(app: FastifyInstance, { db, routes, cityCode, p
           return id;
         });
       } catch (err) {
+        // Two copies of the same order raced each other: answer the loser with the winner's ride.
+        if (isUniqueViolation(err, 'rides_idempotency') || isUniqueViolation(err, 'rides_one_active_per_passenger')) {
+          const winner = await sameOrder();
+          if (winner) return reply.code(200).send(winner);
+        }
         if (isUniqueViolation(err, 'rides_one_active_per_passenger')) {
           return reply.code(409).send({ error: 'active_ride_exists' });
         }

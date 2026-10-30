@@ -7,6 +7,7 @@ import { StatusBar } from 'expo-status-bar';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { api, DEMO, errorText, loadToken, onUnauthorized, saveToken, setApiLanguage } from './api';
 import { App as AppContext, useApp, type Draft, type Route } from './context';
+import { registerForPush, unregisterPush } from './push';
 import { DICTS, type Lang } from './i18n';
 import { RideProvider, useRide } from './ride';
 import { ThemeProvider, useTheme } from './theme';
@@ -53,7 +54,7 @@ function Root() {
     onUnauthorized(signOut);
     (async () => {
       if (await loadToken()) {
-        try { const m = await api<Me>('/me'); applyLang(m.language); setMe(m); } catch { await saveToken(null); }
+        try { const m = await api<Me>('/me'); applyLang(m.language); setMe(m); registerForPush(); } catch { await saveToken(null); }
       }
       setBooting(false);
     })();
@@ -63,7 +64,7 @@ function Root() {
   const ctx = useMemo(() => ({
     lang, t, me, setMe, draft, setDraft,
     setLang: (l: Lang) => { applyLang(l); if (me) api('/me', { method: 'PATCH', body: { language: l } }).catch(() => {}); },
-    logout: () => { api('/auth/logout', { body: {} }).catch(() => {}); saveToken(null); signOut(); },
+    logout: async () => { await unregisterPush(); api('/auth/logout', { body: {} }).catch(() => {}); saveToken(null); signOut(); },
     push: (r: Route) => setStack((s) => [...s, r]),
     pop: () => setStack((s) => s.slice(0, -1)),
     reset: () => setStack([]),
@@ -77,7 +78,7 @@ function Root() {
     content = auth.step === 'language' ? <LanguageScreen onPick={(l) => { applyLang(l); setAuth({ step: 'phone' }); }} />
       : auth.step === 'phone' ? <PhoneScreen lang={lang} onSent={(phone) => setAuth({ step: 'code', phone })} onBack={() => setAuth({ step: 'language' })} />
         : <CodeScreen lang={lang} phone={auth.phone} onBack={() => setAuth({ step: 'phone' })}
-          onSignedIn={async (token) => { await saveToken(token); const m = await api<Me>('/me'); applyLang(m.language); setMe(m); }} />;
+          onSignedIn={async (token) => { await saveToken(token); const m = await api<Me>('/me'); applyLang(m.language); setMe(m); registerForPush(); }} />;
   } else {
     content = <RideProvider><Main stack={stack} /></RideProvider>;
   }

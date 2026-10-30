@@ -11,6 +11,8 @@ import { DEV_TOKEN_KEY } from './payments/crypto.ts';
 import { prepayTick } from './payments/prepay.ts';
 import { FileService, LocalFileStorage } from './files/index.ts';
 import { createGeoProvider } from './geo/provider.ts';
+import { createPushSender } from './push/sender.ts';
+import { pushTick } from './push/outbox.ts';
 
 const payments = new PaymentService({
   db: pool,
@@ -41,7 +43,9 @@ const app = await buildApp({
   logger: true,
 });
 
-// Background loop every 2 s: dispatcher (next driver after a timeout, new drivers, giving up after
+const push = createPushSender(config.pushProvider, config.expoAccessToken, (m) => app.log.info(m));
+
+// Background loop every 2 s (push notifications: every 1 s, so a new order rings at once): dispatcher (next driver after a timeout, new drivers, giving up after
 // the search window) and card prepayment at 60% of the trip. Overlapping runs are skipped; several instances are safe.
 const DISPATCH_TICK_MS = 2000;
 let ticking = false;
@@ -52,7 +56,15 @@ const ticker = setInterval(() => {
     .catch((err) => app.log.error(err, 'background tick failed'))
     .finally(() => { ticking = false; });
 }, DISPATCH_TICK_MS);
-app.addHook('onClose', async () => clearInterval(ticker));
+let pushing = false;
+const pushTicker = setInterval(() => {
+  if (pushing) return;
+  pushing = true;
+  pushTick(pool, push, app.log)
+    .catch((err) => app.log.error(err, 'push tick failed'))
+    .finally(() => { pushing = false; });
+}, 1000);
+app.addHook('onClose', async () => { clearInterval(ticker); clearInterval(pushTicker); });
 
 try {
   await app.listen({ port: config.port, host: '0.0.0.0' });

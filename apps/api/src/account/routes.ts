@@ -53,6 +53,7 @@ export async function accountRoutes(app: FastifyInstance, { db, payments }: Deps
         await tx.query(`DELETE FROM passenger_blocked_drivers WHERE user_id = $1`, [userId]);
         await tx.query(`DELETE FROM auth_codes WHERE phone = $1`, [user!.phone]);
         await tx.query(`UPDATE sessions SET revoked_at = now() WHERE user_id = $1 AND revoked_at IS NULL`, [userId]);
+        await tx.query(`UPDATE push_tokens SET revoked_at = now() WHERE user_id = $1 AND revoked_at IS NULL`, [userId]);
         // A driver account goes with it: off the map at once.
         await tx.query(`DELETE FROM driver_presence p USING drivers d WHERE d.id = p.driver_id AND d.user_id = $1`, [userId]);
         await tx.query(`UPDATE drivers SET deleted_at = now() WHERE user_id = $1 AND deleted_at IS NULL`, [userId]);

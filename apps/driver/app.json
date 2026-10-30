@@ -6,7 +6,11 @@
     "orientation": "portrait",
     "userInterfaceStyle": "automatic",
     "scheme": "taxidriver",
-    "platforms": ["ios", "android", "web"],
+    "platforms": [
+      "ios",
+      "android",
+      "web"
+    ],
     "ios": {
       "bundleIdentifier": "uz.taxi.driver",
       "supportsTablet": false,
@@ -15,17 +19,46 @@
         "NSLocationAlwaysAndWhenInUseUsageDescription": "While you are on the line your position is sent so passengers can find you, also with the screen off.",
         "NSCameraUsageDescription": "To photograph your documents for verification.",
         "NSPhotoLibraryUsageDescription": "To choose photos of your documents for verification.",
-        "UIBackgroundModes": ["location"]
+        "UIBackgroundModes": [
+          "location"
+        ]
       }
     },
     "android": {
       "package": "uz.taxi.driver",
-      "permissions": ["ACCESS_FINE_LOCATION", "ACCESS_COARSE_LOCATION", "ACCESS_BACKGROUND_LOCATION", "FOREGROUND_SERVICE", "FOREGROUND_SERVICE_LOCATION", "CAMERA"]
+      "permissions": [
+        "ACCESS_FINE_LOCATION",
+        "ACCESS_COARSE_LOCATION",
+        "ACCESS_BACKGROUND_LOCATION",
+        "FOREGROUND_SERVICE",
+        "FOREGROUND_SERVICE_LOCATION",
+        "CAMERA"
+      ]
     },
     "plugins": [
-      ["expo-location", { "isAndroidBackgroundLocationEnabled": true, "isAndroidForegroundServiceEnabled": true }],
-      "expo-secure-store"
+      [
+        "expo-location",
+        {
+          "isAndroidBackgroundLocationEnabled": true,
+          "isAndroidForegroundServiceEnabled": true
+        }
+      ],
+      "expo-secure-store",
+      [
+        "expo-notifications",
+        {
+          "color": "#0B6A70"
+        }
+      ]
     ],
-    "web": { "bundler": "metro", "output": "single" }
+    "web": {
+      "bundler": "metro",
+      "output": "single"
+    },
+    "extra": {
+      "eas": {
+        "projectId": ""
+      }
+    }
   }
 }

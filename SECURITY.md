@@ -140,6 +140,22 @@ every item below has a regression test in `apps/api/test/security.test.ts` or th
 - The demo's pretend server is swapped for an empty stub in real builds (checked: no demo data in the bundle).
 - A 401 from the API signs the app out at once.
 
+## Push notifications
+
+- No secrets in the apps and no Apple / Google keys on our servers: we send through Expo's push service
+  (optional `EXPO_ACCESS_TOKEN` restricts sending to our server).
+- Lock screens are public: notifications carry no phone numbers or passenger names. A driver's new-order
+  alert shows only the price and the distance to the pickup.
+- Only Expo push tokens are accepted; a device belongs to one account at a time (signing in elsewhere moves
+  it); sign-out and account deletion revoke tokens; tokens the push service reports as gone are revoked.
+- Notifications are written in the same transaction as the ride event (outbox), so none is sent for a
+  change that was rolled back. Production refuses `PUSH_PROVIDER=log`.
+
+## Idempotent orders
+
+- `POST /rides` accepts an `Idempotency-Key` (UUID). Keys are scoped to the passenger, so one user can
+  never receive another user's ride through a guessed key.
+
 ## Account deletion and blocked drivers
 
 - `DELETE /me` needs an explicit `{"confirm": true}` and is refused during a ride or while money is owed
@@ -173,7 +189,8 @@ The API refuses to start in production if:
 - `AUTH_SECRET` is shorter than 32 characters or is the development value;
 - `SMS_PROVIDER=console` (it would print login codes to the log);
 - `ROUTE_PROVIDER` is not `osrm`;
-- `GEO_PROVIDER` is not `nominatim`.
+- `GEO_PROVIDER` is not `nominatim`;
+- `PUSH_PROVIDER` is not `expo`.
 
 ## Dependencies
 

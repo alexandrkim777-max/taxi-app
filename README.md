@@ -92,6 +92,7 @@ Tests: `npm test` (the API integration tests need a migrated database at `DATABA
 | POST | `/rides/:id/block-driver` | passenger | Never match me with this ride's driver again (the driver is not told) |
 | GET / DELETE | `/me/blocked-drivers`, `/me/blocked-drivers/:id` | user | The list; remove from it |
 | DELETE | `/me` | user | Deletes the account (`{"confirm": true}`); refused during a ride or with unpaid amounts |
+| POST / DELETE | `/me/push-token` | user | Register this device for push (Expo token, `app: driver \| passenger`); remove on sign-out |
 | POST | `/rides/:id/complaint` | participants | Complaint about the ride (rude, unsafe driving, asked for extra cash, …) |
 
 ### Driver app
@@ -142,6 +143,29 @@ npm run build:demo                      # clickable web demo with a pretend serv
 - Rating with tags; ride history with complaint and dispute (both sides write their account).
 - Cards are added through the payment provider's SDK (stubbed until access is granted); the card number
   never reaches our server. Requests time out (10–15 s); reads are retried once, writes never.
+
+### Push notifications
+
+Ride events are turned into notifications in the same database transaction (`push_outbox`) and sent
+every second by a background loop through Expo's push service (`PUSH_PROVIDER=expo`). Drivers: a new
+order rings on the loud `orders` channel and expires after 20 s; the passenger cancelled. Passengers:
+driver on the way (car and plate), arrived, cancelled or could not wait, no driver found, confirm a
+higher price, card declined. Texts are in the recipient's language. If the push service is down,
+sending is retried (3 attempts); devices that no longer exist are dropped.
+
+To turn it on in the apps: create the project in Expo (`eas init`), put its id in `EXPO_PUBLIC_EAS_PROJECT_ID`
+(or `app.json` → `extra.eas.projectId`), and add the Firebase (Android) and APNs (iOS) credentials in EAS.
+
+### Orders are safe to retry
+
+The passenger app sends an `Idempotency-Key` with each order and retries once after a network error;
+the server returns the same ride for the same key instead of creating a second one.
+
+### CI
+
+`.github/workflows/ci.yml` runs on every push: migrations on a fresh PostGIS database, type checks of
+the API, admin, driver and passenger apps, the full API test suite, an admin build checked for demo
+data, and `npm audit` for production dependencies.
 
 ### Maps
 

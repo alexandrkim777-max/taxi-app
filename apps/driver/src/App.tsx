@@ -6,6 +6,7 @@ import { Pressable, View } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { api, ApiError, DEMO, loadToken, saveToken } from './api';
+import { registerForPush, unregisterPush } from './push';
 import { App as AppContext, useApp, type DriverProfile } from './context';
 import { DICTS, type Lang } from './i18n';
 import { LineProvider, useLine } from './line';
@@ -55,7 +56,7 @@ function Root() {
       if (await loadToken()) {
         try {
           const me = await api<{ language: Lang }>('/me');
-          setLangState(me.language); setSignedIn(true); await reloadDriver();
+          setLangState(me.language); setSignedIn(true); await reloadDriver(); registerForPush();
         } catch { await saveToken(null); }
       }
       setBooting(false);
@@ -66,7 +67,8 @@ function Root() {
     setLangState(l);
     if (signedIn) api('/me', { method: 'PATCH', body: { language: l } }).catch(() => {});
   };
-  const logout = () => {
+  const logout = async () => {
+    await unregisterPush();
     api('/auth/logout', { body: {} }).catch(() => {});
     saveToken(null); setSignedIn(false); setDriver(null); setDriverLoaded(false); setAuth({ step: 'language' });
   };
@@ -84,7 +86,7 @@ function Root() {
     content = auth.step === 'language' ? <LanguageScreen onPick={(l) => { setLangState(l); setAuth({ step: 'phone' }); }} />
       : auth.step === 'phone' ? <PhoneScreen lang={lang} onSent={(phone) => setAuth({ step: 'code', phone })} onBack={() => setAuth({ step: 'language' })} />
         : <CodeScreen lang={lang} phone={auth.phone} onBack={() => setAuth({ step: 'phone' })}
-          onSignedIn={async (token) => { await saveToken(token); setSignedIn(true); await reloadDriver(); }} />;
+          onSignedIn={async (token) => { await saveToken(token); setSignedIn(true); await reloadDriver(); registerForPush(); }} />;
   } else if (!driverLoaded) {
     content = <View style={{ flex: 1, backgroundColor: c.surfacePage }} />;
   } else if (!driver || driver.vehicles.length === 0) {

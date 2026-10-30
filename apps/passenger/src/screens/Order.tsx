@@ -2,10 +2,10 @@
 // when they would be the same), payment, confirm. The passenger never sees drivers' tariffs or a
 // list of drivers: the server picks the driver by the chosen rule and never charges more than shown.
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Pressable, ScrollView, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { api, ApiError } from '../api';
+import { api, ApiError, newKey } from '../api';
 import { useApp } from '../context';
 import { km, money } from '../format';
 import { Map } from '../map/Map';
@@ -38,6 +38,7 @@ export function OrderScreen() {
   const [options, setOptions] = useState<Record<string, boolean>>({});
   const [comment, setComment] = useState('');
   const [busy, setBusy] = useState(false);
+  const orderKey = useRef(newKey());
   const [error, setError] = useState<string | null>(null);
 
   const points = [pickup, ...stops];
@@ -73,6 +74,8 @@ export function OrderScreen() {
     setBusy(true); setError(null);
     try {
       const ride = await api<Ride>('/rides', {
+        // One key per order attempt: a retry after a lost answer gets the same ride back.
+        idempotencyKey: orderKey.current,
         body: {
           classCode: cls, mode: 'auto', priority: ch.priority, maxPriceTiyin: ch.priceTiyin,
           stops: points.map(({ lat, lng, address, entranceId, entranceLabel }) => ({
@@ -83,6 +86,7 @@ export function OrderScreen() {
         },
       });
       setRide(ride);
+      orderKey.current = newKey();
       setDraft((d) => ({ ...d, stops: [] }));
       reset();
     } catch (e) {

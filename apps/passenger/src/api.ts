@@ -42,15 +42,29 @@ export class ApiError extends Error {
   }
 }
 
-export async function api<T = unknown>(path: string, opts: { method?: string; body?: unknown } = {}): Promise<T> {
+/** A random v4 UUID for idempotency keys (not a secret, so Math.random is enough where crypto is missing). */
+export function newKey(): string {
+  const g = (globalThis as { crypto?: { getRandomValues?: (a: Uint8Array) => Uint8Array } }).crypto;
+  const b = new Uint8Array(16);
+  if (g?.getRandomValues) g.getRandomValues(b); else for (let i = 0; i < 16; i++) b[i] = Math.floor(Math.random() * 256);
+  b[6] = (b[6]! & 0x0f) | 0x40; b[8] = (b[8]! & 0x3f) | 0x80;
+  const h = [...b].map((x) => x.toString(16).padStart(2, '0')).join('');
+  return `${h.slice(0, 8)}-${h.slice(8, 12)}-${h.slice(12, 16)}-${h.slice(16, 20)}-${h.slice(20)}`;
+}
+
+/**
+ * `idempotencyKey`: a write that is safe to repeat (the server returns the first result for the same
+ * key), so it is retried once after a network error like a read.
+ */
+export async function api<T = unknown>(path: string, opts: { method?: string; body?: unknown; idempotencyKey?: string } = {}): Promise<T> {
   const method = opts.method ?? (opts.body === undefined ? 'GET' : 'POST');
   if (DEMO) {
     const res = await mockApi(method, path, opts.body);
     if (res.status >= 400) throw new ApiError(res.status, res.body as Record<string, unknown>);
     return res.body as T;
   }
-  // Bad mobile networks: every request has a time limit; reads are retried once, writes never
-  // (the server refuses a second active ride anyway, but a write is not repeated blindly).
+  // Bad mobile networks: every request has a time limit; reads (and writes with an idempotency key)
+  // are retried once; other writes never, so nothing is done twice.
   let res: Response | null = null;
   for (let attempt = 0; ; attempt++) {
     try {
@@ -60,13 +74,14 @@ export async function api<T = unknown>(path: string, opts: { method?: string; bo
           ...(opts.body === undefined ? {} : { 'content-type': 'application/json' }),
           ...(token ? { authorization: `Bearer ${token}` } : {}),
           'accept-language': language,
+          ...(opts.idempotencyKey ? { 'idempotency-key': opts.idempotencyKey } : {}),
         },
         body: opts.body === undefined ? undefined : JSON.stringify(opts.body),
         signal: AbortSignal.timeout(method === 'GET' ? 10_000 : 15_000),
       });
       break;
     } catch (e) {
-      if (method !== 'GET' || attempt >= 1) throw new ApiError(0, { error: 'network' });
+      if ((method !== 'GET' && !opts.idempotencyKey) || attempt >= 1) throw new ApiError(0, { error: 'network' });
       await new Promise((r) => setTimeout(r, 800));
     }
   }
