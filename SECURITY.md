@@ -119,6 +119,16 @@ every item below has a regression test in `apps/api/test/security.test.ts` or th
   new orders only and is stored on each ride, so a later change never alters an existing price.
 - Blocking a driver removes them from the map at once; blocks carry a reason and are lifted with one.
 
+## Consent and monitoring
+
+- Ordering, applying as a driver and going online require the current version of the offer / driver
+  agreement and the privacy policy to be accepted; who accepted which version, when, from which IP is
+  kept (`user_consents`), also after the account is deleted. An outdated version cannot be "accepted".
+- Errors (API 5xx, background jobs, crashes in both apps and the staff panel) are grouped in our own
+  database (`error_events`), never a third-party service. Phone numbers, tokens, card numbers and emails
+  are cut out before storing. `POST /client-errors` takes no sign-in (apps crash before it), is size-
+  and rate-limited and stores nothing it was not asked to. Admins only see the list.
+
 ## Staff panel (web)
 
 - Served from the API's own domain; no CORS, no third-party scripts except Google Fonts.

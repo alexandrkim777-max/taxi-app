@@ -12,7 +12,7 @@ import { Map } from '../map/Map';
 import type { MapPin } from '../map/types';
 import { useRide } from '../ride';
 import { radius, space, useTheme } from '../theme';
-import { lineToPoints, type Card, type Entrance, type Priority, type Quote, type QuoteClass, type Ride, type Stop } from '../types';
+import { lineToPoints, type LegalDoc, type Card, type Entrance, type Priority, type Quote, type QuoteClass, type Ride, type Stop } from '../types';
 import { Button, Card as Box, Chip, Divider, ErrorNote, Field, Header, Pill, Row, T } from '../components/ui';
 
 const OPTIONS = ['childSeat', 'pet', 'quiet', 'luggage'] as const;
@@ -22,7 +22,7 @@ const MAX_STOPS = 4; // plus the pickup: 5 points, as the API allows
 interface Choice { priority: Priority; priceTiyin: number }
 
 export function OrderScreen() {
-  const { t, lang, draft, setDraft, push, pop, reset, err } = useApp();
+  const { t, lang, draft, setDraft, push, pop, reset, err, needConsent } = useApp();
   const { setRide } = useRide();
   const { c } = useTheme();
   const pickup = draft.pickup!;
@@ -91,6 +91,8 @@ export function OrderScreen() {
       reset();
     } catch (e) {
       if (e instanceof ApiError && e.code === 'unpaid_debt') push({ name: 'debts' });
+      // A new version of the offer: accept it, then order again (the order is kept on screen).
+      if (e instanceof ApiError && e.code === 'consent_required') { needConsent(e.body.documents as LegalDoc[]); return; }
       // The price moved since the quote (a driver changed their tariff): fetch fresh options.
       if (e instanceof ApiError && e.code === 'price_out_of_range') loadQuote().then(setQuote).catch(() => {});
       setError(err(e));

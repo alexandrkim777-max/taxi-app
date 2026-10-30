@@ -49,6 +49,9 @@ PAYMENT_PROVIDERS=fake
 PAYMENT_RETURN_URL=taxiapp://payment-result
 PUSH_PROVIDER=expo
 EXPO_ACCESS_TOKEN=
+# Optional: Telegram alerts about new kinds of errors (bot token from @BotFather, your chat id).
+ALERT_TELEGRAM_BOT_TOKEN=
+ALERT_TELEGRAM_CHAT_ID=
 ENV
 fi
 

@@ -27,6 +27,9 @@ import type { ProviderName } from './payments/types.ts';
 import { setFileService, type FileService } from './files/index.ts';
 import { fileRoutes } from './files/routes.ts';
 import { geoRoutes } from './geo/routes.ts';
+import { legalRoutes } from './legal/documents.ts';
+import { ErrorMonitor } from './monitoring/errors.ts';
+import { monitoringRoutes } from './monitoring/routes.ts';
 import { DevGeoProvider, type GeoProvider } from './geo/provider.ts';
 
 export interface AppDeps {
@@ -48,6 +51,10 @@ export interface AppDeps {
   devRoutes?: boolean;
   /** Private document storage with signed links. */
   files: FileService;
+  /** Where server errors go (grouped in the database, optional alerts); a plain one by default. */
+  monitor?: ErrorMonitor;
+  /** Where the offer, driver agreement and privacy policy are published. */
+  legalBaseUrl?: string;
   /** Address search; defaults to the built-in development list. */
   geo?: GeoProvider;
 }
@@ -64,11 +71,16 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
       : false,
   });
 
-  // Never leak internal errors (SQL, stack traces) to clients.
+  const monitor = deps.monitor ?? new ErrorMonitor(deps.db);
+  // Never leak internal errors (SQL, stack traces) to clients; every 5xx is recorded for staff.
   app.setErrorHandler((error: FastifyError, request, reply) => {
     const status = error.statusCode ?? 500;
     if (status >= 500) {
       request.log.error(error);
+      void monitor.record({
+        source: 'api', message: error.message, stack: error.stack ?? null,
+        context: { route: `${request.method} ${request.routeOptions?.url ?? 'unknown'}`, status },
+      });
       return reply.code(500).send({ error: 'internal_error' });
     }
     if (error instanceof HttpError) return reply.code(status).send({ error: error.code, ...error.extra });
@@ -93,10 +105,12 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
 
   await app.register(authRoutes, { db: deps.db, sms: deps.sms, authSecret: deps.authSecret });
   await app.register(staffAuthRoutes, { db: deps.db, authSecret: deps.authSecret });
-  await app.register(driverRoutes, { db: deps.db, fileBaseUrl: deps.fileBaseUrl, cityCode: deps.cityCode });
+  const legalBaseUrl = deps.legalBaseUrl ?? 'http://localhost:3000/legal';
+  await app.register(legalRoutes, { db: deps.db, baseUrl: legalBaseUrl });
+  await app.register(driverRoutes, { db: deps.db, fileBaseUrl: deps.fileBaseUrl, cityCode: deps.cityCode, legalBaseUrl });
   await app.register(tariffRoutes, { db: deps.db, routes: deps.routes, cityCode: deps.cityCode });
-  await app.register(dispatchRoutes, { db: deps.db });
-  await app.register(rideRoutes, { db: deps.db, routes: deps.routes, cityCode: deps.cityCode, payments: deps.payments });
+  await app.register(dispatchRoutes, { db: deps.db, legalBaseUrl });
+  await app.register(rideRoutes, { db: deps.db, routes: deps.routes, cityCode: deps.cityCode, payments: deps.payments, legalBaseUrl });
   await app.register(routeChangeRoutes, { db: deps.db, routes: deps.routes });
   await app.register(disputeRoutes, { db: deps.db });
   await app.register(ratingRoutes, { db: deps.db });
@@ -105,6 +119,7 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
   await app.register(complaintRoutes, { db: deps.db });
   await app.register(accountRoutes, { db: deps.db, payments: deps.payments });
   await app.register(pushRoutes, { db: deps.db });
+  await app.register(monitoringRoutes, { db: deps.db, monitor });
   await app.register(adminPeopleRoutes, { db: deps.db, cityCode: deps.cityCode });
   await app.register(adminPricingRoutes, { db: deps.db, cityCode: deps.cityCode });
   await app.register(adminOpsRoutes, { db: deps.db, cityCode: deps.cityCode });

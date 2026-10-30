@@ -6,9 +6,11 @@ import { requireUser } from '../auth/session.ts';
 import { driverPosition } from '../lib/geo.ts';
 import { hashToken } from '../lib/secrets.ts';
 import { driverContext, goOffline, goOnline, updatePosition, type Position } from './presence.ts';
+import { requireConsent } from '../legal/documents.ts';
 
 interface Deps {
   db: pg.Pool;
+  legalBaseUrl: string;
 }
 
 /** Rate-limit key per session token (hashed), so drivers behind one mobile NAT don't share a limit. */
@@ -20,10 +22,12 @@ function perSession(request: FastifyRequest): string {
 // A ping every 3–5 s is normal; anything far above that is a broken or abusive client.
 const PING_LIMIT = { rateLimit: { max: 40, timeWindow: '1 minute', keyGenerator: perSession } };
 
-export async function dispatchRoutes(app: FastifyInstance, { db }: Deps): Promise<void> {
+export async function dispatchRoutes(app: FastifyInstance, { db, legalBaseUrl }: Deps): Promise<void> {
+  // A new version of the agreement is accepted before the next shift.
+  const driverConsent = requireConsent(db, 'driver', legalBaseUrl);
   app.post<{ Body: Position }>(
     '/drivers/me/online',
-    { preHandler: requireUser, schema: { body: driverPosition } },
+    { preHandler: [requireUser, driverConsent], schema: { body: driverPosition } },
     async (request, reply) => {
       const ctx = await driverContext(db, request.user!.id);
       if (!ctx) return reply.code(404).send({ error: 'no_verified_vehicle' });

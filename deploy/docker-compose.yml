@@ -12,6 +12,7 @@ services:
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - admin:/srv/admin:ro
+      - ./legal:/srv/legal:ro
       - caddy_data:/data
     depends_on: [api]
 

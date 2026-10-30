@@ -14,11 +14,12 @@ import { Disputes, DisputeDetail } from './views/Disputes';
 import { Rides, RideDetail } from './views/Rides';
 import { Pricing } from './views/Pricing';
 import { Finance, Audit } from './views/Finance';
+import { Errors } from './views/Errors';
 
-type NavKey = 'dashboard' | 'moderation' | 'search' | 'complaints' | 'disputes' | 'rides' | 'pricing' | 'finance' | 'audit';
+type NavKey = 'dashboard' | 'moderation' | 'search' | 'complaints' | 'disputes' | 'rides' | 'pricing' | 'finance' | 'audit' | 'errors';
 const NAV: { key: NavKey; adminOnly?: boolean }[] = [
   { key: 'dashboard' }, { key: 'moderation' }, { key: 'complaints' }, { key: 'disputes' }, { key: 'search' },
-  { key: 'rides' }, { key: 'pricing' }, { key: 'finance', adminOnly: true }, { key: 'audit', adminOnly: true },
+  { key: 'rides' }, { key: 'pricing' }, { key: 'finance', adminOnly: true }, { key: 'audit', adminOnly: true }, { key: 'errors', adminOnly: true },
 ];
 /** Detail views and the list they belong to. */
 const PARENT: Record<string, NavKey> = { driver: 'moderation', user: 'search', complaint: 'complaints', dispute: 'disputes', ride: 'rides' };
@@ -172,6 +173,7 @@ function View({ view, id }: { view: string; id: string | null }) {
     case 'pricing': return <Pricing />;
     case 'finance': return <Finance />;
     case 'audit': return <Audit />;
+    case 'errors': return <Errors />;
     default: return <Dashboard />;
   }
 }

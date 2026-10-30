@@ -56,6 +56,7 @@ const uz = {
   categories: {
     price: 'Narx', route: 'Yoʻnalish', behavior: 'Xulq', cancellation: 'Bekor qilish', vehicle: 'Mashina', lost_item: 'Unutilgan narsa', safety: 'Xavfsizlik', other: 'Boshqa',
   },
+  consentTitle: 'Shartlar', consentText: 'Buyurtma berishdan oldin xizmat shartlari va maxfiylik siyosati bilan tanishing.', consentCheck: 'Ommaviy oferta va maxfiylik siyosatini qabul qilaman', consentAccept: 'Qabul qilish', legalDocs: { passenger_offer: 'Yoʻlovchilar uchun oferta', driver_agreement: 'Haydovchi shartnomasi', privacy: 'Maxfiylik siyosati' },
   errors: {
     network: 'Internet aloqasi yoʻq. Qayta urinib koʻring', active_ride: 'Avval safarni yakunlang', too_many_blocked: 'Roʻyxat toʻla', unpaid_debt: 'Avval qarzni toʻlang', active_ride_exists: 'Sizda faol safar bor', price_out_of_range: 'Narx eskirdi, qayta urinib koʻring',
     card_not_found: 'Karta topilmadi', routing_unavailable: 'Yoʻnalishni hisoblab boʻlmadi', too_many_rides: 'Juda koʻp buyurtma. Keyinroq urinib koʻring',
@@ -122,6 +123,7 @@ const ru: Dict = {
   categories: {
     price: 'Цена', route: 'Маршрут', behavior: 'Поведение', cancellation: 'Отмена', vehicle: 'Машина', lost_item: 'Забытая вещь', safety: 'Безопасность', other: 'Другое',
   },
+  consentTitle: 'Условия', consentText: 'Перед заказом прочитайте условия сервиса и политику конфиденциальности.', consentCheck: 'Я принимаю публичную оферту и политику конфиденциальности', consentAccept: 'Принять', legalDocs: { passenger_offer: 'Оферта для пассажиров', driver_agreement: 'Договор с водителем', privacy: 'Политика конфиденциальности' },
   errors: {
     network: 'Нет связи с интернетом. Попробуйте ещё раз', active_ride: 'Сначала завершите поездку', too_many_blocked: 'Список заполнен', unpaid_debt: 'Сначала оплатите долг', active_ride_exists: 'У вас уже есть активная поездка', price_out_of_range: 'Цена устарела, попробуйте ещё раз',
     card_not_found: 'Карта не найдена', routing_unavailable: 'Не удалось построить маршрут', too_many_rides: 'Слишком много заказов. Попробуйте позже',
@@ -186,6 +188,7 @@ const en: Dict = {
   categories: {
     price: 'Price', route: 'Route', behavior: 'Behaviour', cancellation: 'Cancellation', vehicle: 'Car', lost_item: 'Lost item', safety: 'Safety', other: 'Other',
   },
+  consentTitle: 'Terms', consentText: 'Before your first order, please read the terms of service and the privacy policy.', consentCheck: 'I accept the public offer and the privacy policy', consentAccept: 'Accept', legalDocs: { passenger_offer: 'Passenger offer', driver_agreement: 'Driver agreement', privacy: 'Privacy policy' },
   errors: {
     network: 'No connection. Please try again', active_ride: 'Finish the ride first', too_many_blocked: 'The list is full', unpaid_debt: 'Please pay your debt first', active_ride_exists: 'You already have an active ride', price_out_of_range: 'The price is out of date, try again',
     card_not_found: 'Card not found', routing_unavailable: 'Could not build the route', too_many_rides: 'Too many orders. Try later',

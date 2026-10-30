@@ -179,6 +179,12 @@ function ridePayments(r: Record<string, any>): any[] {
   return demoPayments[r.id]!;
 }
 
+/** Demo error list: what the panel shows when the apps or the server fail. */
+const demoErrors = [
+  { id: '41', source: 'driver', message: 'Network request failed', stack: 'TypeError: Network request failed\n    at sendPosition (location.ts:38:5)', context: { platform: 'android', screen: 'uncaught' }, appVersion: '0.1.0', count: 17, firstSeen: ago(300), lastSeen: ago(4), resolvedAt: null as string | null },
+  { id: '40', source: 'api', message: 'OSRM responded 503', stack: 'Error: OSRM responded 503\n    at OsrmRouteProvider.route (routing/index.ts:96:24)', context: { route: 'POST /quotes', status: 500 }, appVersion: null, count: 3, firstSeen: ago(90), lastSeen: ago(35), resolvedAt: null as string | null },
+];
+
 export async function mockApi(method: string, fullPath: string, body: any): Promise<Res> {
   await new Promise((r) => setTimeout(r, 120));
   const [path, qs] = fullPath.split('?');
@@ -380,6 +386,13 @@ export async function mockApi(method: string, fullPath: string, body: any): Prom
     refundsPending: [{ id: id(), rideId: r2.id, amountTiyin: 450_000, createdAt: ago(170) }] });
   }
   if (is('GET', '/admin/audit')) return ok(audit.slice(0, 100));
+  if (is('GET', '/admin/errors')) {
+    return ok(q.get('status') === 'resolved' ? [] : demoErrors.filter((e) => !e.resolvedAt));
+  }
+  if ((m = is('POST', '/admin/errors/:/resolve'))) {
+    const e = demoErrors.find((x) => x.id === m![0]); if (!e) return err(404, 'not_found');
+    e.resolvedAt = new Date().toISOString(); log('error_resolved', 'error_event', e.id); return { status: 204, body: {} };
+  }
   return err(404, 'not_found');
 }
 

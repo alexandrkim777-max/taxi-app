@@ -78,6 +78,9 @@ export async function mockApi(method: string, fullPath: string, body: any): Prom
     return ok({ token: 'demo', user: state.user });
   }
   if (path === '/me' && method === 'GET') return ok(state.user);
+  // The demo has nothing to accept (the texts are published with the real service).
+  if (path === '/me/consents' && method === 'GET') return ok({ needed: [] });
+  if (path === '/me/consents' && method === 'POST') return ok({});
   if (path === '/me' && method === 'PATCH') { Object.assign(state.user, body); lang = state.user.language; return ok(state.user); }
 
   if (path === '/drivers/me' && method === 'GET') return state.driver ? ok(profile()) : err(404, 'not_a_driver');

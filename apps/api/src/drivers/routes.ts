@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import type pg from 'pg';
 import { requireStaff, requireUser } from '../auth/session.ts';
+import { requireConsent } from '../legal/documents.ts';
 import { audit } from '../admin/audit.ts';
 import { fileService, MAX_UPLOAD_BYTES } from '../files/index.ts';
 
@@ -11,6 +12,7 @@ interface Deps {
   /** Only links into our own storage are accepted (no arbitrary URLs). */
   fileBaseUrl: string;
   cityCode: string;
+  legalBaseUrl: string;
 }
 
 async function driverIdFor(db: pg.Pool, userId: string): Promise<string | null> {
@@ -58,11 +60,13 @@ export async function driverProfile(db: pg.Pool, driverId: string) {
   };
 }
 
-export async function driverRoutes(app: FastifyInstance, { db, fileBaseUrl, cityCode }: Deps): Promise<void> {
+export async function driverRoutes(app: FastifyInstance, { db, fileBaseUrl, cityCode, legalBaseUrl }: Deps): Promise<void> {
+  // Applying needs the driver agreement and the privacy policy accepted first.
+  const driverConsent = requireConsent(db, 'driver', legalBaseUrl);
   app.post<{ Body: { name: string; gender?: 'female' | 'male'; languages?: string[] } }>(
     '/drivers/apply',
     {
-      preHandler: requireUser,
+      preHandler: [requireUser, driverConsent],
       schema: {
         body: {
           type: 'object',

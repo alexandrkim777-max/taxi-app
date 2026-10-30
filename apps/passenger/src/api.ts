@@ -6,6 +6,7 @@ import { mockApi } from './mock';
 
 export const DEMO = process.env.EXPO_PUBLIC_DEMO === '1';
 const BASE = (process.env.EXPO_PUBLIC_API_URL ?? 'http://localhost:3000').replace(/\/$/, '');
+export const API_BASE = BASE;
 const TOKEN_KEY = 'session_token';
 /** Sent with every request so search results and tags come back in the user's language. */
 let language = 'uz';

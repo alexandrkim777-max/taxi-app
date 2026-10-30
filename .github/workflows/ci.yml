@@ -57,6 +57,11 @@ jobs:
           PORT=3999 PUSH_PROVIDER=log node --experimental-strip-types --no-warnings apps/api/src/server.ts > server.log 2>&1 &
           for i in $(seq 1 30); do curl -sf localhost:3999/health && break; sleep 1; done
           curl -sf localhost:3999/health || (cat server.log; exit 1)
+      - name: First-ride check against the running server (the script the test server uses)
+        run: |
+          # No other drivers on the map in CI: take test drivers off the line so ours is the one asked.
+          psql "$DATABASE_URL" -qc "UPDATE driver_presence SET updated_at = now() - interval '20 minutes'"
+          CHECK_API_URL=http://localhost:3999 node --experimental-strip-types --no-warnings apps/api/src/tools/first-ride-check.ts
       - name: Admin panel builds without demo data
         run: |
           npm run build --workspace apps/admin

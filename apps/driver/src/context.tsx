@@ -1,3 +1,4 @@
+import type { LegalDoc } from './screens/Consent';
 // App-wide state: language, the driver's profile, sign-out.
 
 import { createContext, useContext } from 'react';
@@ -19,6 +20,8 @@ export interface AppCtx {
   driver: DriverProfile | null;
   reloadDriver: () => Promise<DriverProfile | null>;
   logout: () => void;
+  /** The server asked for the current agreement / policy to be accepted (shows the consent screen). */
+  needConsent: (docs: LegalDoc[]) => void;
 }
 
 export const App = createContext<AppCtx | null>(null);

@@ -14,6 +14,7 @@ import type pg from 'pg';
 import { canTransition, clampToCorridor, scaledFareTiyin, type RideStatus } from '@taxi/shared';
 import { requireUser } from '../auth/session.ts';
 import { lineJson, type RouteProvider } from '../routing/index.ts';
+import { requireConsent } from '../legal/documents.ts';
 import type { PaymentService } from '../payments/service.ts';
 import { uuidParams } from '../lib/geo.ts';
 import { cancelTerms, ARRIVAL_RADIUS_M, waitingOf } from './cancellation.ts';
@@ -29,6 +30,7 @@ interface Deps {
   routes: RouteProvider;
   cityCode: string;
   payments: PaymentService;
+  legalBaseUrl: string;
 }
 
 /** Anti-spam: rides a passenger can create per hour (each one pings drivers). */
@@ -49,7 +51,9 @@ interface CreateBody {
 }
 
 
-export async function rideRoutes(app: FastifyInstance, { db, routes, cityCode, payments }: Deps): Promise<void> {
+export async function rideRoutes(app: FastifyInstance, { db, routes, cityCode, payments, legalBaseUrl }: Deps): Promise<void> {
+  // A passenger orders only after accepting the current offer and privacy policy.
+  const passengerConsent = requireConsent(db, 'passenger', legalBaseUrl);
   /**
    * Card rides at completion: charge whatever is still due (the whole fare if the ride ended before
    * the 60% prepayment, or the rest after a route change). A decline now becomes a debt.
@@ -76,7 +80,7 @@ export async function rideRoutes(app: FastifyInstance, { db, routes, cityCode, p
   app.post<{ Body: CreateBody }>(
     '/rides',
     {
-      preHandler: requireUser,
+      preHandler: [requireUser, passengerConsent],
       config: { rateLimit: { max: 10, timeWindow: '1 minute' } },
       schema: {
         body: {

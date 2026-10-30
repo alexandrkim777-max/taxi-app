@@ -233,6 +233,9 @@ export async function mockApi(method: string, rawPath: string, body: any): Promi
   if (method === 'POST' && path === '/auth/verify') return /^\d{6}$/.test(body.code) ? ok({ token: 'demo' }) : fail(400, 'invalid_code');
   if (method === 'POST' && path === '/auth/logout') return ok({});
   if (method === 'GET' && path === '/me') return ok(state.user);
+  // The demo has nothing to accept (the texts are published with the real service).
+  if (method === 'GET' && path === '/me/consents') return ok({ needed: [] });
+  if (method === 'POST' && path === '/me/consents') return ok({}, 204);
   if (method === 'PATCH' && path === '/me') { Object.assign(state.user, body); if (body.language) lang = body.language; return ok(state.user); }
 
   if (method === 'DELETE' && path === '/me') {

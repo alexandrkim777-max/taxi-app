@@ -76,6 +76,11 @@ export const config = {
   fileStorageDir: process.env.FILE_STORAGE_DIR ?? './var/files',
   /** Public base URL of this API, used in signed file links (e.g. https://example.uz/api). */
   publicApiUrl: process.env.PUBLIC_API_URL ?? `http://localhost:${process.env.PORT ?? 3000}`,
+  /** Optional Telegram alerts about new kinds of errors (a bot token and the chat to write to). */
+  alertTelegramBotToken: process.env.ALERT_TELEGRAM_BOT_TOKEN || undefined,
+  alertTelegramChatId: process.env.ALERT_TELEGRAM_CHAT_ID || undefined,
+  /** Published legal texts (offer, driver agreement, privacy policy): <base>/<code>.html */
+  legalBaseUrl: process.env.LEGAL_BASE_URL ?? `${process.env.PUBLIC_BASE_URL ?? process.env.PUBLIC_API_URL ?? `http://localhost:${process.env.PORT ?? 3000}`}/legal`,
   geoProvider,
   pushProvider,
   expoAccessToken: process.env.EXPO_ACCESS_TOKEN || undefined,

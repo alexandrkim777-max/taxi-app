@@ -8,6 +8,7 @@ import { activateKeepAwakeAsync, deactivateKeepAwake } from 'expo-keep-awake';
 import { api, ApiError, errorText } from './api';
 import { currentPosition, lastPingOkAt, onNotOnline, requestPermission, startTracking, stopTracking } from './location';
 import { useApp } from './context';
+import type { LegalDoc } from './screens/Consent';
 
 export interface Stop { position: number; lat: number; lng: number; address: string | null; entrance?: string | null }
 export interface Request {
@@ -58,7 +59,7 @@ export function useLine(): LineCtx {
 const ACTIVE = ['accepted', 'driver_en_route', 'arrived', 'in_progress'];
 
 export function LineProvider({ children }: { children: ReactNode }) {
-  const { t } = useApp();
+  const { t, needConsent } = useApp();
   const [online, setOnline] = useState(false);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
@@ -164,7 +165,11 @@ export function LineProvider({ children }: { children: ReactNode }) {
       try {
         if (!(await requestPermission())) { setNotice(t.locationNeeded); return; }
         const pos = await currentPosition();
-        await api('/drivers/me/online', { body: pos });
+        try { await api('/drivers/me/online', { body: pos }); } catch (e) {
+          // A new version of the agreement: accept it first, then go online again.
+          if (e instanceof ApiError && e.code === 'consent_required') { needConsent(e.body.documents as LegalDoc[]); return; }
+          throw e;
+        }
         await startTracking(t.online);
         setOnline(true);
       } catch (err) { setNotice(explain(err)); } finally { setBusy(false); }

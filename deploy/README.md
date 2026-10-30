@@ -21,6 +21,11 @@ git clone https://github.com/alexandrkim777-max/taxi-app.git /opt/taxi
 - Restore drill: `restore-check.sh` weekly restores the newest dump into a scratch database, checks it and
   drops it. Run it by hand after setup too. Real restore: `restore.sh <taxi-*.dump> [files-*.tgz]`
   (stops the API, asks to type RESTORE).
+- First-ride check: `./first-ride-check.sh` plays a whole cash ride through the live API with two temporary
+  test accounts and prints the 12-point list (✅ checked by the server, 📱 to check on two phones).
+- Errors: the staff panel's "Errors" page (admins). For Telegram alerts about new kinds of errors, set
+  `ALERT_TELEGRAM_BOT_TOKEN` and `ALERT_TELEGRAM_CHAT_ID` in `.env` and run `update.sh`.
+- Legal texts: `deploy/legal/*.html` (drafts until the lawyer approves); the apps link to them.
 - Restarts are safe: everything is in the database. `docker compose restart api` mid-ride: the ride, the
   search and the sessions carry on; card rides a crash left uncharged are charged within a few minutes.
 - Map tiles still come from OpenFreeMap in test builds; our own tile server (docs/maps.md) comes next.

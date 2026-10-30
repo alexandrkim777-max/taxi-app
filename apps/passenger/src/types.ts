@@ -74,4 +74,6 @@ export interface DisputeView {
   otherHasWritten: boolean; awaitingMe: boolean; outcome: string | null; resolution: string | null;
 }
 
+export interface LegalDoc { code: 'passenger_offer' | 'driver_agreement' | 'privacy'; version: string; url: string }
+
 export interface Me { id: string; phone: string; name: string | null; language: 'uz' | 'ru' | 'en'; roles: string[] }

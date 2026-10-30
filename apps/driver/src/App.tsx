@@ -3,6 +3,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { Pressable, View } from 'react-native';
+import { ErrorBoundary, installErrorReporting } from './monitoring';
 import { StatusBar } from 'expo-status-bar';
 import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { api, ApiError, DEMO, loadToken, saveToken } from './api';
@@ -14,19 +15,24 @@ import { space, ThemeProvider, useTheme } from './theme';
 import { T } from './components/ui';
 import { CodeScreen, LanguageScreen, PhoneScreen } from './screens/Auth';
 import { ApplyScreen, DocumentsScreen, PendingScreen } from './screens/Onboarding';
+import { ConsentScreen, type LegalDoc } from './screens/Consent';
 import { HomeScreen, RateScreen, RideScreen } from './screens/Line';
 import { ProfileScreen, SubscriptionScreen, TariffScreen } from './screens/Account';
 
 type Auth = { step: 'language' } | { step: 'phone' } | { step: 'code'; phone: string };
 type Tab = 'line' | 'price' | 'subscription' | 'profile';
 
+installErrorReporting();
+
 export function App() {
   return (
-    <SafeAreaProvider>
-      <ThemeProvider>
-        <Root />
-      </ThemeProvider>
-    </SafeAreaProvider>
+    <ErrorBoundary label="Что-то пошло не так. / Nimadir xato ketdi." retry="Перезапустить / Qayta ishga tushirish">
+      <SafeAreaProvider>
+        <ThemeProvider>
+          <Root />
+        </ThemeProvider>
+      </SafeAreaProvider>
+    </ErrorBoundary>
   );
 }
 
@@ -39,6 +45,11 @@ function Root() {
   const [driver, setDriver] = useState<DriverProfile | null>(null);
   const [driverLoaded, setDriverLoaded] = useState(false);
   const [docsStep, setDocsStep] = useState(false);
+  // Texts to accept before applying or going online (empty = all accepted).
+  const [consents, setConsents] = useState<LegalDoc[]>([]);
+  const checkConsents = useCallback(() => {
+    api<{ needed: LegalDoc[] }>('/me/consents?app=driver').then((r) => setConsents(r.needed)).catch(() => {});
+  }, []);
 
   const reloadDriver = useCallback(async () => {
     try {
@@ -56,12 +67,12 @@ function Root() {
       if (await loadToken()) {
         try {
           const me = await api<{ language: Lang }>('/me');
-          setLangState(me.language); setSignedIn(true); await reloadDriver(); registerForPush();
+          setLangState(me.language); setSignedIn(true); checkConsents(); await reloadDriver(); registerForPush();
         } catch { await saveToken(null); }
       }
       setBooting(false);
     })();
-  }, [reloadDriver]);
+  }, [reloadDriver, checkConsents]);
 
   const setLang = (l: Lang) => {
     setLangState(l);
@@ -86,7 +97,9 @@ function Root() {
     content = auth.step === 'language' ? <LanguageScreen onPick={(l) => { setLangState(l); setAuth({ step: 'phone' }); }} />
       : auth.step === 'phone' ? <PhoneScreen lang={lang} onSent={(phone) => setAuth({ step: 'code', phone })} onBack={() => setAuth({ step: 'language' })} />
         : <CodeScreen lang={lang} phone={auth.phone} onBack={() => setAuth({ step: 'phone' })}
-          onSignedIn={async (token) => { await saveToken(token); setSignedIn(true); await reloadDriver(); registerForPush(); }} />;
+          onSignedIn={async (token) => { await saveToken(token); setSignedIn(true); checkConsents(); await reloadDriver(); registerForPush(); }} />;
+  } else if (consents.length) {
+    content = <ConsentScreen docs={consents} onDone={setConsents} />;
   } else if (!driverLoaded) {
     content = <View style={{ flex: 1, backgroundColor: c.surfacePage }} />;
   } else if (!driver || driver.vehicles.length === 0) {
@@ -100,7 +113,7 @@ function Root() {
   }
 
   return (
-    <AppContext.Provider value={{ lang, t, setLang, driver, reloadDriver, logout }}>
+    <AppContext.Provider value={{ lang, t, setLang, driver, reloadDriver, logout, needConsent: setConsents }}>
       <StatusBar style={dark ? 'light' : 'dark'} />
       <View style={{ flex: 1, backgroundColor: c.surfacePage }}>
         {DEMO && <View style={{ position: 'absolute', zIndex: 5, right: 12, top: 8 }} pointerEvents="none"><T v="label" muted>{t.demo}</T></View>}

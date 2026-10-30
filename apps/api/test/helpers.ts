@@ -16,6 +16,7 @@ import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { currentStep, totpAt } from '../src/auth/totp.ts';
+import { LEGAL_VERSIONS } from '../src/legal/documents.ts';
 import { CSRF_HEADER, CSRF_VALUE, STAFF_COOKIE } from '../src/auth/session.ts';
 
 export const testFiles = new FileService({
@@ -38,8 +39,16 @@ class CapturingSms implements SmsSender {
   }
 }
 
+/**
+ * A phone number no other test has used recently: +998 0XXXXXXXX (no real operator code starts with 0,
+ * so it can never be someone's number). Numbers run in sequence from a clock-based start that moves
+ * 1009 numbers a second, so consecutive runs never reuse a number within a day. Random numbers used
+ * to repeat now and then in a long run, and the one-SMS-a-minute limit then failed a test at random.
+ */
+let phoneSeq = (Math.floor(Date.now() / 1000) * 1009) % 100_000_000;
 export function randomPhone(): string {
-  return `+99890${String(Math.floor(Math.random() * 10_000_000)).padStart(7, '0')}`;
+  phoneSeq = (phoneSeq + 1) % 100_000_000;
+  return `+9980${String(phoneSeq).padStart(8, '0')}`;
 }
 
 let service: PaymentService | null = null;
@@ -58,14 +67,23 @@ export async function setup(opts: { rateLimit?: boolean } = {}) {
     db, sms, payments: payments(), files: testFiles, devRoutes: true, authSecret: 'test-secret', routes: new EstimateRouteProvider(),
     fileBaseUrl: 'https://files.example/', cityCode: 'tashkent', rateLimit: opts.rateLimit ?? false,
   });
-  async function login(phone: string): Promise<string> {
+  /** Signs in by SMS without accepting any legal text (a brand-new user). */
+  async function loginOnly(phone: string): Promise<string> {
     const req = await app.inject({ method: 'POST', url: '/auth/request-code', payload: { phone, language: 'ru' } });
     assert.equal(req.statusCode, 204);
     const res = await app.inject({ method: 'POST', url: '/auth/verify', payload: { phone, code: sms.last.get(phone) } });
     assert.equal(res.statusCode, 200, res.body);
     return res.json().token;
   }
-  return { app, sms, login };
+  /** Signs in and accepts the current offer, driver agreement and privacy policy, as the apps do. */
+  async function login(phone: string): Promise<string> {
+    const token = await loginOnly(phone);
+    const accept = Object.entries(LEGAL_VERSIONS).map(([code, version]) => ({ code, version }));
+    const res = await app.inject({ method: 'POST', url: '/me/consents', headers: { authorization: `Bearer ${token}` }, payload: { accept } });
+    assert.equal(res.statusCode, 204, res.body);
+    return token;
+  }
+  return { app, sms, login, loginOnly };
 }
 
 export type Setup = Awaited<ReturnType<typeof setup>>;

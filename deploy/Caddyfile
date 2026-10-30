@@ -24,6 +24,12 @@
 		file_server
 	}
 
+	# The offer, driver agreement and privacy policy the apps link to (LEGAL_BASE_URL).
+	handle_path /legal/* {
+		root * /srv/legal
+		file_server
+	}
+
 	handle {
 		reverse_proxy api:3000
 	}

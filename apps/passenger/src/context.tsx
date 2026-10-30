@@ -2,7 +2,7 @@
 
 import { createContext, useContext, type ReactNode } from 'react';
 import type { Dict, Lang } from './i18n';
-import type { Card, Me, Stop } from './types';
+import type { Card, Me, Stop, LegalDoc } from './types';
 
 export type Route =
   | { name: 'search'; purpose: 'pickup' | 'dropoff' | 'stop' | 'home' | 'work' | 'other'; onPick: (s: Stop) => void }
@@ -32,6 +32,8 @@ export interface AppCtx {
   reset: () => void;
   draft: Draft;
   setDraft: (d: Draft | ((d: Draft) => Draft)) => void;
+  /** The server asked for the current offer / policy to be accepted (shows the consent screen). */
+  needConsent: (docs: LegalDoc[]) => void;
   /** Error codes from the API in the user's language. */
   err: (e: unknown) => string;
 }

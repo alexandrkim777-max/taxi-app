@@ -20,8 +20,9 @@ const ru = {
   theme: 'Тема',
   nav: {
     dashboard: 'Главная', moderation: 'Модерация', search: 'Поиск', complaints: 'Жалобы', disputes: 'Споры',
-    rides: 'Поездки', pricing: 'Цены', finance: 'Финансы', audit: 'Журнал',
+    rides: 'Поездки', pricing: 'Цены', finance: 'Финансы', audit: 'Журнал', errors: 'Ошибки',
   },
+  errorsHint: 'Сбои сервера и приложений, сгруппированные по виду', errorsOpen: 'Открытые', errorsResolved: 'Исправленные', errorsNone: 'Ошибок нет', errorsStack: 'Стек', errorsFixed: 'Исправлено', errorsFirst: 'Впервые',
   live: 'Сейчас', today: 'Сегодня', queues: 'Ждут решения',
   driversOnline: 'На линии', driversOnRide: 'В поездке', searching: 'Ищут водителя', pickup: 'Едут к клиенту', inTrip: 'Везут',
   ordered: 'Заказов', completed: 'Выполнено', cancelledByPassenger: 'Отменили пассажиры', cancelledByDriver: 'Отменили водители',
@@ -88,8 +89,9 @@ const uz: Dict = {
   theme: 'Mavzu',
   nav: {
     dashboard: 'Bosh sahifa', moderation: 'Tekshiruv', search: 'Qidiruv', complaints: 'Shikoyatlar', disputes: 'Nizolar',
-    rides: 'Safarlar', pricing: 'Narxlar', finance: 'Moliya', audit: 'Jurnal',
+    rides: 'Safarlar', pricing: 'Narxlar', finance: 'Moliya', audit: 'Jurnal', errors: 'Xatolar',
   },
+  errorsHint: 'Server va ilovalardagi nosozliklar, turlari boʻyicha', errorsOpen: 'Ochiq', errorsResolved: 'Tuzatilgan', errorsNone: 'Xatolar yoʻq', errorsStack: 'Stek', errorsFixed: 'Tuzatildi', errorsFirst: 'Birinchi marta',
   live: 'Hozir', today: 'Bugun', queues: 'Qaror kutmoqda',
   driversOnline: 'Liniyada', driversOnRide: 'Safarda', searching: 'Haydovchi qidirilmoqda', pickup: 'Mijozga ketmoqda', inTrip: 'Olib ketmoqda',
   ordered: 'Buyurtmalar', completed: 'Bajarildi', cancelledByPassenger: 'Yoʻlovchilar bekor qildi', cancelledByDriver: 'Haydovchilar bekor qildi',

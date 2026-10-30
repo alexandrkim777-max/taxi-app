@@ -5,16 +5,18 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
+import { ErrorBoundary, installErrorReporting } from './monitoring';
 import { api, DEMO, errorText, loadToken, onUnauthorized, saveToken, setApiLanguage } from './api';
 import { App as AppContext, useApp, type Draft, type Route } from './context';
 import { registerForPush, unregisterPush } from './push';
 import { DICTS, type Lang } from './i18n';
 import { RideProvider, useRide } from './ride';
 import { ThemeProvider, useTheme } from './theme';
-import type { Me } from './types';
+import type { Me, LegalDoc } from './types';
 import { T } from './components/ui';
 import { CodeScreen, LanguageScreen, PhoneScreen } from './screens/Auth';
 import { HomeScreen } from './screens/Home';
+import { ConsentScreen } from './screens/Consent';
 import { SearchScreen } from './screens/Search';
 import { OrderScreen } from './screens/Order';
 import { RideScreen } from './screens/Ride';
@@ -25,13 +27,17 @@ import { Menu } from './screens/Menu';
 
 type Auth = { step: 'language' } | { step: 'phone' } | { step: 'code'; phone: string };
 
+installErrorReporting();
+
 export function App() {
   return (
-    <SafeAreaProvider>
-      <ThemeProvider>
-        <Root />
-      </ThemeProvider>
-    </SafeAreaProvider>
+    <ErrorBoundary label="Что-то пошло не так. / Nimadir xato ketdi." retry="Перезапустить / Qayta ishga tushirish">
+      <SafeAreaProvider>
+        <ThemeProvider>
+          <Root />
+        </ThemeProvider>
+      </SafeAreaProvider>
+    </ErrorBoundary>
   );
 }
 
@@ -43,6 +49,11 @@ function Root() {
   const [auth, setAuth] = useState<Auth>({ step: 'language' });
   const [stack, setStack] = useState<Route[]>([]);
   const [draft, setDraft] = useState<Draft>({ pickup: null, stops: [] });
+  // Texts to accept before ordering (empty = all accepted).
+  const [consents, setConsents] = useState<LegalDoc[]>([]);
+  const checkConsents = useCallback(() => {
+    api<{ needed: LegalDoc[] }>('/me/consents?app=passenger').then((r) => setConsents(r.needed)).catch(() => {});
+  }, []);
 
   const applyLang = (l: Lang) => { setLangState(l); setApiLanguage(l); };
 
@@ -54,11 +65,11 @@ function Root() {
     onUnauthorized(signOut);
     (async () => {
       if (await loadToken()) {
-        try { const m = await api<Me>('/me'); applyLang(m.language); setMe(m); registerForPush(); } catch { await saveToken(null); }
+        try { const m = await api<Me>('/me'); applyLang(m.language); setMe(m); registerForPush(); checkConsents(); } catch { await saveToken(null); }
       }
       setBooting(false);
     })();
-  }, [signOut]);
+  }, [signOut, checkConsents]);
 
   const t = DICTS[lang];
   const ctx = useMemo(() => ({
@@ -68,6 +79,7 @@ function Root() {
     push: (r: Route) => setStack((s) => [...s, r]),
     pop: () => setStack((s) => s.slice(0, -1)),
     reset: () => setStack([]),
+    needConsent: setConsents,
     err: (e: unknown) => errorText(e, t.errors),
   }), [lang, t, me, draft, signOut]);
 
@@ -78,7 +90,9 @@ function Root() {
     content = auth.step === 'language' ? <LanguageScreen onPick={(l) => { applyLang(l); setAuth({ step: 'phone' }); }} />
       : auth.step === 'phone' ? <PhoneScreen lang={lang} onSent={(phone) => setAuth({ step: 'code', phone })} onBack={() => setAuth({ step: 'language' })} />
         : <CodeScreen lang={lang} phone={auth.phone} onBack={() => setAuth({ step: 'phone' })}
-          onSignedIn={async (token) => { await saveToken(token); const m = await api<Me>('/me'); applyLang(m.language); setMe(m); registerForPush(); }} />;
+          onSignedIn={async (token) => { await saveToken(token); const m = await api<Me>('/me'); applyLang(m.language); setMe(m); registerForPush(); checkConsents(); }} />;
+  } else if (consents.length) {
+    content = <ConsentScreen docs={consents} onDone={setConsents} />;
   } else {
     content = <RideProvider><Main stack={stack} /></RideProvider>;
   }

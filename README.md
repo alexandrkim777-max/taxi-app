@@ -44,6 +44,11 @@ Tests: `npm test` (the API integration tests need a migrated database at `DATABA
 | --- | --- | --- | --- |
 | POST | `/auth/request-code` | anyone | Language (uz / ru / en, chosen on the first screen) + phone; sends a 6-digit SMS code; one per phone per 60 s, valid 5 min |
 | POST | `/auth/verify` | anyone | Checks the code (max 5 attempts), returns a bearer token (90 days) |
+| GET | `/legal` | anyone | Current versions and links of the offer, driver agreement and privacy policy |
+| GET | `/me/consents?app=passenger\|driver` | user | Texts still to accept (428 `consent_required` on order / apply / going online lists the same) |
+| POST | `/me/consents` | user | Accepts exactly the versions shown (`version_outdated` otherwise) |
+| POST | `/client-errors` | anyone | Crash report from an app or the panel (scrubbed, grouped, rate-limited) |
+| GET | `/admin/errors?status=open\|resolved` | admin | Grouped errors; `POST /admin/errors/:id/resolve` marks a kind fixed |
 | POST | `/staff/auth/verify` | staff | Panel sign-in step 1: SMS code → ticket (and a new authenticator key on the first sign-in) |
 | POST | `/staff/auth/totp` | staff | Step 2: authenticator code → httpOnly session cookie (30 min idle, 12 h max) |
 | POST | `/staff/auth/logout` | staff | Ends the panel session |

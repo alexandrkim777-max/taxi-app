@@ -14,6 +14,7 @@ import { FileService, LocalFileStorage } from './files/index.ts';
 import { createGeoProvider } from './geo/provider.ts';
 import { createPushSender } from './push/sender.ts';
 import { pushTick } from './push/outbox.ts';
+import { ErrorMonitor, TelegramAlerter } from './monitoring/errors.ts';
 
 const payments = new PaymentService({
   db: pool,
@@ -23,7 +24,14 @@ const payments = new PaymentService({
   fiscal: new FakeFiscalProvider(),
 });
 
+const monitor = new ErrorMonitor(
+  pool,
+  config.alertTelegramBotToken && config.alertTelegramChatId ? new TelegramAlerter(config.alertTelegramBotToken, config.alertTelegramChatId) : null,
+  process.env.DOMAIN ?? 'taxi',
+);
+
 const app = await buildApp({
+  monitor,
   db: pool,
   payments,
   geo: createGeoProvider(config.geoProvider, config.nominatimUrl),
@@ -39,6 +47,7 @@ const app = await buildApp({
   routes: createRouteProvider(config.routeProvider, config.osrmUrl),
   authSecret: config.authSecret,
   fileBaseUrl: config.fileBaseUrl,
+  legalBaseUrl: config.legalBaseUrl,
   cityCode: config.defaultCityCode,
   trustProxy: config.trustProxy,
   logger: true,
@@ -65,7 +74,11 @@ const ticker = setInterval(() => {
   ];
   Promise.allSettled(jobs.map(([, p]) => p))
     .then((results) => results.forEach((r, i) => {
-      if (r.status === 'rejected') app.log.error({ err: r.reason, job: jobs.at(i)?.[0] }, 'background job failed');
+      if (r.status !== 'rejected') return;
+      const job = jobs.at(i)?.[0] ?? 'unknown';
+      app.log.error({ err: r.reason, job }, 'background job failed');
+      const e = r.reason instanceof Error ? r.reason : new Error(String(r.reason));
+      void monitor.record({ source: 'job', message: e.message, stack: e.stack ?? null, context: { job } });
     }))
     .finally(() => { ticking = false; });
 }, DISPATCH_TICK_MS);
@@ -74,10 +87,26 @@ const pushTicker = setInterval(() => {
   if (pushing) return;
   pushing = true;
   pushTick(pool, push, app.log)
-    .catch((err) => app.log.error(err, 'push tick failed'))
+    .catch((err) => {
+      app.log.error(err, 'push tick failed');
+      void monitor.record({ source: 'job', message: err instanceof Error ? err.message : String(err), stack: err instanceof Error ? err.stack : null, context: { job: 'push' } });
+    })
     .finally(() => { pushing = false; });
 }, 1000);
 app.addHook('onClose', async () => { clearInterval(ticker); clearInterval(pushTicker); });
+
+// A promise nobody awaited, or an exception nothing caught: recorded, then (for the latter) a clean
+// exit so Docker restarts the API rather than letting it run in an unknown state.
+process.on('unhandledRejection', (reason) => {
+  app.log.error({ err: reason }, 'unhandled rejection');
+  const e = reason instanceof Error ? reason : new Error(String(reason));
+  void monitor.record({ source: 'api', message: e.message, stack: e.stack ?? null, context: { route: 'unhandledRejection' } });
+});
+process.on('uncaughtException', (err) => {
+  app.log.fatal(err, 'uncaught exception');
+  monitor.record({ source: 'api', message: err.message, stack: err.stack ?? null, context: { route: 'uncaughtException' } })
+    .finally(() => process.exit(1));
+});
 
 // Graceful stop (docker stop / redeploy sends SIGTERM): stop the loops, finish requests in flight,
 // close the pool. Everything lives in the database, so the next start simply carries on.
