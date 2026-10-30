@@ -35,23 +35,38 @@ export class ApiError extends Error {
   }
 }
 
-export async function api<T = unknown>(path: string, opts: { method?: string; body?: unknown } = {}): Promise<T> {
+/**
+ * Requests have a time limit (bad mobile networks). Reads are retried once; so are writes marked
+ * `retry`, which the server treats as idempotent (accept, status, cancel: a repeat changes nothing).
+ */
+export async function api<T = unknown>(path: string, opts: { method?: string; body?: unknown; retry?: boolean } = {}): Promise<T> {
   const method = opts.method ?? (opts.body === undefined ? 'GET' : 'POST');
   if (DEMO) {
     const res = await mockApi(method, path, opts.body);
     if (res.status >= 400) throw new ApiError(res.status, res.body as Record<string, unknown>);
     return res.body as T;
   }
-  const res = await fetch(`${BASE}${path}`, {
-    method,
-    headers: {
-      ...(opts.body === undefined ? {} : { 'content-type': 'application/json' }),
-      ...(token ? { authorization: `Bearer ${token}` } : {}),
-    },
-    body: opts.body === undefined ? undefined : JSON.stringify(opts.body),
-  });
+  let res: Response | null = null;
+  for (let attempt = 0; ; attempt++) {
+    try {
+      res = await fetch(`${BASE}${path}`, {
+        method,
+        headers: {
+          ...(opts.body === undefined ? {} : { 'content-type': 'application/json' }),
+          ...(token ? { authorization: `Bearer ${token}` } : {}),
+        },
+        body: opts.body === undefined ? undefined : JSON.stringify(opts.body),
+        signal: AbortSignal.timeout(method === 'GET' ? 10_000 : 15_000),
+      });
+      break;
+    } catch {
+      if ((method !== 'GET' && !opts.retry) || attempt >= 1) throw new ApiError(0, { error: 'network' });
+      await new Promise((r) => setTimeout(r, 800));
+    }
+  }
   const text = await res.text();
   const body = text ? JSON.parse(text) : {};
+  if (res.status === 204) return null as T;
   if (res.status === 401) await saveToken(null);
   if (!res.ok) throw new ApiError(res.status, body);
   return body as T;

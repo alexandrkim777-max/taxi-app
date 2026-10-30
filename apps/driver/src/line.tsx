@@ -147,7 +147,7 @@ export function LineProvider({ children }: { children: ReactNode }) {
     accept: async () => {
       if (!request) return;
       setBusy(true);
-      try { setRide(await api<Ride>(`/rides/${request.rideId}/accept`, { body: {} })); setRequest(null); }
+      try { setRide(await api<Ride>(`/rides/${request.rideId}/accept`, { body: {}, retry: true })); setRequest(null); }
       catch (err) { setRequest(null); setNotice(explain(err)); } finally { setBusy(false); }
     },
     decline: async () => {
@@ -160,7 +160,7 @@ export function LineProvider({ children }: { children: ReactNode }) {
       if (!ride) return;
       setBusy(true);
       try {
-        const r = await api<Ride>(`/rides/${ride.id}/status`, { body: { status } });
+        const r = await api<Ride>(`/rides/${ride.id}/status`, { body: { status }, retry: true });
         if (r.status === 'completed') { setRide(null); setFinished(r); } else setRide(r);
       } catch (err) { setNotice(explain(err)); } finally { setBusy(false); }
     },
@@ -168,7 +168,7 @@ export function LineProvider({ children }: { children: ReactNode }) {
       if (!ride) return;
       setBusy(true);
       try {
-        await api(`/rides/${ride.id}/cancel`, { body: noShow ? { noShow: true } : reason ? { reason } : {} });
+        await api(`/rides/${ride.id}/cancel`, { body: noShow ? { noShow: true } : reason ? { reason } : {}, retry: true });
         setRide(null);
       } catch (err) { setNotice(explain(err)); } finally { setBusy(false); }
     },

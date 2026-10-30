@@ -56,7 +56,7 @@ export function newKey(): string {
  * `idempotencyKey`: a write that is safe to repeat (the server returns the first result for the same
  * key), so it is retried once after a network error like a read.
  */
-export async function api<T = unknown>(path: string, opts: { method?: string; body?: unknown; idempotencyKey?: string } = {}): Promise<T> {
+export async function api<T = unknown>(path: string, opts: { method?: string; body?: unknown; idempotencyKey?: string; retry?: boolean } = {}): Promise<T> {
   const method = opts.method ?? (opts.body === undefined ? 'GET' : 'POST');
   if (DEMO) {
     const res = await mockApi(method, path, opts.body);
@@ -81,7 +81,7 @@ export async function api<T = unknown>(path: string, opts: { method?: string; bo
       });
       break;
     } catch (e) {
-      if ((method !== 'GET' && !opts.idempotencyKey) || attempt >= 1) throw new ApiError(0, { error: 'network' });
+      if ((method !== 'GET' && !opts.idempotencyKey && !opts.retry) || attempt >= 1) throw new ApiError(0, { error: 'network' });
       await new Promise((r) => setTimeout(r, 800));
     }
   }

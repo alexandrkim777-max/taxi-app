@@ -57,7 +57,7 @@ export function RideScreen({ ride, onMenu }: { ride: Ride; onMenu?: () => void }
   async function cancel(feeTiyin: number) {
     setBusy('cancel'); setError(null);
     try {
-      await api(`/rides/${ride.id}/cancel`, { body: feeTiyin > 0 ? { acceptFeeTiyin: feeTiyin } : {} });
+      await api(`/rides/${ride.id}/cancel`, { body: feeTiyin > 0 ? { acceptFeeTiyin: feeTiyin } : {}, retry: true });
       setRide(null);
     } catch (e) {
       // Waiting kept ticking: show the new amount and ask again.
