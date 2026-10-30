@@ -70,6 +70,12 @@ jobs:
         run: |
           case "$API_URL" in https://*) ;; *) echo "preview builds need an https API address (input api_url or repo variable STAGING_API_URL)"; exit 1;; esac
           node -e "const f='eas.json',j=require('./'+f);j.build.preview.env.EXPO_PUBLIC_API_URL=process.env.API_URL;require('fs').writeFileSync(f,JSON.stringify(j,null,2))"
+      - name: Link to the EAS project (once, when app.json has no project id yet)
+        run: |
+          if [ -z "$(node -p "(require('./app.json').expo.extra?.eas?.projectId) || ''")" ]; then
+            npx --yes eas-cli@27.2.0 init --non-interactive --force
+          fi
+          echo "PROJECT_ID=$(node -p "require('./app.json').expo.extra.eas.projectId")" >> "$GITHUB_ENV"
       - name: Build on EAS (Android)
         id: eas
         run: |
@@ -89,7 +95,7 @@ jobs:
             const fs = require("fs");
             let b = {}; try { b = JSON.parse(fs.readFileSync("build.json", "utf8"))[0] || {}; } catch {}
             const lines = [`**${process.env.APP}** · profile \`${process.env.PROFILE}\` · ${process.env.GITHUB_REF_NAME} · ${(process.env.GITHUB_SHA || "").slice(0, 7)}`];
-            lines.push(`Status: **${b.status || "failed before the build started"}** (exit ${process.env.CODE})`);
+            lines.push(`Status: **${b.status || "failed before the build started"}** (exit ${process.env.CODE}) · EAS project ${process.env.PROJECT_ID || "?"}`);
             if (b.id) lines.push(`Build page: https://expo.dev/accounts/alexandr888s-team/projects/taxi-${process.env.APP}/builds/${b.id}`);
             if (b.artifacts && b.artifacts.buildUrl) lines.push(`Install (APK): ${b.artifacts.buildUrl}`);
             if (b.error) lines.push("Error: " + JSON.stringify(b.error));
