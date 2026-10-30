@@ -31,6 +31,8 @@ jobs:
     env:
       DATABASE_URL: postgres://taxi:taxi@localhost:5432/taxi_test
       NODE_ENV: test
+      # Test-only value; production secrets never live in the repository.
+      AUTH_SECRET: ci-only-not-a-real-secret-0123456789abcdef
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
