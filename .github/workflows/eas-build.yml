@@ -1,5 +1,5 @@
-# Phone builds on Expo's build servers (EAS). Started by pushing a tag
-#   build/<profile>/<app>/<anything>     e.g. build/demo/both/1, build/preview/driver/7
+# Phone builds on Expo's build servers (EAS). Started by pushing a branch
+#   build/<profile>/<app>     e.g. build/demo/both, build/preview/driver (push again to rebuild)
 # or by hand from the Actions tab. Results (install link, or the end of the log on failure) are
 # posted as a comment on the "EAS builds" issue.
 # Needs the repository secret EXPO_TOKEN (a robot token with the Developer role).
@@ -7,7 +7,7 @@ name: EAS build
 
 on:
   push:
-    tags: ['build/**']
+    branches: ['build/**']
   workflow_dispatch:
     inputs:
       app: { description: 'driver, passenger or both', required: true, default: both }
