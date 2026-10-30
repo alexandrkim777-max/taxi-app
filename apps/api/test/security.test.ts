@@ -2,7 +2,7 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { db, randomPhone, setup, skip } from './helpers.ts';
+import { db, randomPhone, setup, skip, staffLogin } from './helpers.ts';
 
 test('per-IP limit on login code requests', { skip }, async () => {
   const { app } = await setup({ rateLimit: true });
@@ -64,7 +64,8 @@ test('a code works only once', { skip }, async () => {
 });
 
 test('input boundaries', { skip }, async () => {
-  const { app, login } = await setup();
+  const s = await setup();
+  const { app, login } = s;
   const auth = { authorization: `Bearer ${await login(randomPhone())}` };
 
   // Protected endpoints need a valid token.
@@ -80,9 +81,7 @@ test('input boundaries', { skip }, async () => {
   assert.equal(foreignFile.statusCode, 400, 'only links into our own storage');
 
   // A malformed id is a 400, not a database error.
-  const adminPhone = randomPhone();
-  const adminAuth = { authorization: `Bearer ${await login(adminPhone)}` };
-  await db.query(`UPDATE users SET roles = roles || ARRAY['admin'] WHERE phone = $1`, [adminPhone]);
+  const adminAuth = (await staffLogin(s, 'admin')).headers;
   const bad = await app.inject({
     method: 'POST', url: `/admin/drivers/not-a-uuid/approve`, headers: adminAuth,
     payload: { vehicleId: 'x', classCode: 'economy' },

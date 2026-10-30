@@ -2,7 +2,7 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { db, randomPhone, setup, skip } from './helpers.ts';
+import { db, randomPhone, setup, skip, staffLogin } from './helpers.ts';
 
 test('SMS login: wrong code, cooldown, success, /me, logout', { skip }, async () => {
   const { app, sms, login } = await setup();
@@ -33,7 +33,8 @@ test('SMS login: wrong code, cooldown, success, /me, logout', { skip }, async ()
 });
 
 test('driver registration and moderation', { skip }, async () => {
-  const { app, login } = await setup();
+  const s = await setup();
+  const { app, login } = s;
   const driverToken = await login(randomPhone());
   const auth = { authorization: `Bearer ${driverToken}` };
 
@@ -50,10 +51,7 @@ test('driver registration and moderation', { skip }, async () => {
   assert.equal(vehicle.json().plate, '01A123BC');
 
   // Admin cannot approve before all documents are uploaded.
-  const adminPhone = randomPhone();
-  const adminToken = await login(adminPhone);
-  await db.query(`UPDATE users SET roles = roles || ARRAY['admin'] WHERE phone = $1`, [adminPhone]);
-  const adminAuth = { authorization: `Bearer ${adminToken}` };
+  const adminAuth = (await staffLogin(s, 'admin')).headers;
   const driverId = applied.json().id;
 
   const early = await app.inject({

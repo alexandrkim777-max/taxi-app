@@ -3,7 +3,7 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { db, randomPhone, setup, skip, type Setup } from './helpers.ts';
+import { db, randomPhone, setup, skip, staffLogin, type Setup } from './helpers.ts';
 import { acceptedRide, createRide, drive, north, offerOf, passenger, type Headers } from './rideHelpers.ts';
 
 type Point = { lat: number; lng: number };
@@ -21,10 +21,7 @@ async function confirm(s: Setup, auth: Headers, rideId: string, stops: Point[], 
 }
 
 async function admin(s: Setup): Promise<Headers> {
-  const phone = randomPhone();
-  const auth = { authorization: `Bearer ${await s.login(phone)}` };
-  await db.query(`UPDATE users SET roles = roles || ARRAY['admin'] WHERE phone = $1`, [phone]);
-  return auth;
+  return (await staffLogin(s, 'admin')).headers;
 }
 
 test('adding a stop: preview, exact confirmation, new price for both sides', { skip }, async () => {

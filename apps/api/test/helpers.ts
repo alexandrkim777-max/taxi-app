@@ -15,6 +15,8 @@ import { FileService, LocalFileStorage } from '../src/files/index.ts';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { currentStep, totpAt } from '../src/auth/totp.ts';
+import { CSRF_HEADER, CSRF_VALUE, STAFF_COOKIE } from '../src/auth/session.ts';
 
 export const testFiles = new FileService({
   storage: new LocalFileStorage(mkdtempSync(join(tmpdir(), 'taxi-files-'))),
@@ -68,8 +70,33 @@ export async function setup(opts: { rateLimit?: boolean } = {}) {
 
 export type Setup = Awaited<ReturnType<typeof setup>>;
 
+/**
+ * A staff member signed in to the panel the real way: SMS code, authenticator set up on the first
+ * sign-in, session cookie. Returns the headers the panel sends (cookie + CSRF header).
+ */
+export async function staffLogin(s: Setup, role: 'admin' | 'support' = 'admin', phone = randomPhone()) {
+  const { rows } = await db.query<{ id: string }>(
+    `INSERT INTO users (phone, roles) VALUES ($1, ARRAY['passenger', $2])
+     ON CONFLICT (phone) DO UPDATE SET roles = array(SELECT DISTINCT unnest(users.roles || ARRAY[$2]))
+     RETURNING id`,
+    [phone, role],
+  );
+  const sent = await s.app.inject({ method: 'POST', url: '/auth/request-code', payload: { phone, language: 'ru' } });
+  assert.equal(sent.statusCode, 204, sent.body);
+  const first = await s.app.inject({ method: 'POST', url: '/staff/auth/verify', payload: { phone, code: s.sms.last.get(phone) } });
+  assert.equal(first.statusCode, 200, first.body);
+  const { ticket, secret } = first.json();
+  assert.ok(secret, 'first sign-in sets up the authenticator');
+  const second = await s.app.inject({ method: 'POST', url: '/staff/auth/totp', payload: { ticket, code: totpAt(secret, currentStep()) } });
+  assert.equal(second.statusCode, 200, second.body);
+  const token = String(second.headers['set-cookie']).match(new RegExp(`${STAFF_COOKIE}=([^;]+)`))![1];
+  const headers: Record<string, string> = { cookie: `${STAFF_COOKIE}=${token}`, [CSRF_HEADER]: CSRF_VALUE };
+  return { headers, userId: rows[0]!.id, phone, secret: secret as string };
+}
+
 /** A verified economy driver with documents, a vehicle and the free trial. Returns auth headers. */
-export async function verifiedDriver({ app, login }: Setup): Promise<Record<string, string>> {
+export async function verifiedDriver(s: Setup): Promise<Record<string, string>> {
+  const { app, login } = s;
   const auth = { authorization: `Bearer ${await login(randomPhone())}` };
   const driver = await app.inject({ method: 'POST', url: '/drivers/apply', headers: auth, payload: { name: 'Aziz' } });
   const vehicle = await app.inject({
@@ -79,9 +106,7 @@ export async function verifiedDriver({ app, login }: Setup): Promise<Record<stri
   for (const type of ['passport', 'license', 'vehicle_registration', 'selfie', 'self_employed']) {
     await app.inject({ method: 'POST', url: '/drivers/me/documents', headers: auth, payload: { type, fileUrl: `https://files.example/${type}.jpg` } });
   }
-  const adminPhone = randomPhone();
-  const adminAuth = { authorization: `Bearer ${await login(adminPhone)}` };
-  await db.query(`UPDATE users SET roles = roles || ARRAY['admin'] WHERE phone = $1`, [adminPhone]);
+  const adminAuth = (await staffLogin(s, 'admin')).headers;
   const ok = await app.inject({
     method: 'POST', url: `/admin/drivers/${driver.json().id}/approve`, headers: adminAuth,
     payload: { vehicleId: vehicle.json().id, classCode: 'economy' },

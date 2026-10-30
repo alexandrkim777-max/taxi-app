@@ -1,31 +1,12 @@
 // API client. The panel talks to the same API as the apps, under /api on the same domain.
-// The session token lives in sessionStorage: gone when the tab closes, never in a cookie
-// readable by other sites. In the demo build every call is answered by an in-browser mock.
+// The session is an httpOnly cookie set by the server after SMS + authenticator sign-in: page
+// scripts never see it. Every request carries the CSRF header the server requires for writes.
+// In the demo build every call is answered by an in-browser mock.
 
 import { mockApi } from './mock';
 
 declare const __DEMO__: boolean;
 export const DEMO = __DEMO__;
-
-const TOKEN_KEY = 'taxi_admin_token';
-
-export function getToken(): string | null {
-  if (DEMO) return 'demo';
-  try {
-    return sessionStorage.getItem(TOKEN_KEY);
-  } catch {
-    return null;
-  }
-}
-
-export function setToken(token: string | null): void {
-  try {
-    if (token) sessionStorage.setItem(TOKEN_KEY, token);
-    else sessionStorage.removeItem(TOKEN_KEY);
-  } catch {
-    /* storage unavailable: the session lasts for this page only */
-  }
-}
 
 export class ApiError extends Error {
   status: number;
@@ -39,6 +20,10 @@ export class ApiError extends Error {
   }
 }
 
+/** The shell registers this to drop back to the login screen when the session ends. */
+let onSignedOut: (() => void) | null = null;
+export function setSignedOutHandler(cb: (() => void) | null): void { onSignedOut = cb; }
+
 export async function api<T = unknown>(path: string, opts: { method?: string; body?: unknown } = {}): Promise<T> {
   const method = opts.method ?? (opts.body === undefined ? 'GET' : 'POST');
   if (DEMO) {
@@ -46,16 +31,16 @@ export async function api<T = unknown>(path: string, opts: { method?: string; bo
     if (res.status >= 400) throw new ApiError(res.status, res.body as Record<string, unknown>);
     return res.body as T;
   }
-  const token = getToken();
   const res = await fetch(`/api${path}`, {
     method,
+    credentials: 'same-origin',
     headers: {
+      'x-requested-with': 'taxi-admin',
       ...(opts.body === undefined ? {} : { 'content-type': 'application/json' }),
-      ...(token ? { authorization: `Bearer ${token}` } : {}),
     },
     body: opts.body === undefined ? undefined : JSON.stringify(opts.body),
   });
-  if (res.status === 401) setToken(null);
+  if (res.status === 401 && path !== '/me') onSignedOut?.();
   const text = await res.text();
   const body = text ? JSON.parse(text) : {};
   if (!res.ok) throw new ApiError(res.status, body);

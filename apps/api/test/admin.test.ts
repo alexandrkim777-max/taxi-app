@@ -2,18 +2,17 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { db, randomPhone, setup, skip, verifiedDriver, type Setup } from './helpers.ts';
+import { db, randomPhone, setup, skip, staffLogin, verifiedDriver, type Setup } from './helpers.ts';
 import { acceptedRide, drive, north, passenger, randomSpot, type Headers } from './rideHelpers.ts';
 
 async function staff(s: Setup, role: 'admin' | 'support'): Promise<Headers & { userId: string }> {
-  const phone = randomPhone();
-  const token = await s.login(phone);
-  const { rows } = await db.query(`UPDATE users SET roles = roles || ARRAY[$2] WHERE phone = $1 RETURNING id`, [phone, role]);
-  return { authorization: `Bearer ${token}`, userId: rows[0].id };
+  const { headers, userId } = await staffLogin(s, role);
+  return { ...headers, userId };
 }
 
 function hdr(h: Headers & { userId?: string }): Headers {
-  return { authorization: h.authorization! };
+  const { userId: _, ...rest } = h;
+  return rest as Headers;
 }
 
 async function economyQuote(s: Setup, auth: Headers, spot: { lat: number; lng: number }) {
@@ -211,10 +210,15 @@ test('staff roles: only admins grant them, nobody removes their own admin', { sk
   assert.equal((await put(admin, someoneId, ['superuser'])).statusCode, 400);
   const granted = await put(admin, someoneId, ['support']);
   assert.deepEqual(granted.json().roles, ['passenger', 'support']);
-  assert.equal((await s.app.inject({ method: 'GET', url: '/admin/dashboard', headers: someone })).statusCode, 200, 'new support member works at once');
+  // The phone-app session does not open the panel; signing in to the panel (SMS + authenticator) does.
+  assert.equal((await s.app.inject({ method: 'GET', url: '/admin/dashboard', headers: someone })).statusCode, 403);
+  const phone = (await s.app.inject({ method: 'GET', url: '/me', headers: someone })).json().phone;
+  await db.query(`DELETE FROM auth_codes WHERE phone = $1`, [phone]);
+  const panel = await staffLogin(s, 'support', phone);
+  assert.equal((await s.app.inject({ method: 'GET', url: '/admin/dashboard', headers: panel.headers })).statusCode, 200, 'new support member works at once');
   assert.equal((await put(admin, admin.userId, ['passenger'])).statusCode, 409);
   await put(admin, someoneId, ['passenger']);
-  assert.equal((await s.app.inject({ method: 'GET', url: '/admin/dashboard', headers: someone })).statusCode, 403, 'and loses access at once');
+  assert.equal((await s.app.inject({ method: 'GET', url: '/admin/dashboard', headers: panel.headers })).statusCode, 401, 'and loses access at once');
   await s.app.close();
 });
 

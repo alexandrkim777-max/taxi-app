@@ -11,6 +11,11 @@ const ru = {
   code: 'Код из СМС',
   signIn: 'Войти',
   notStaff: 'У этого номера нет доступа к панели',
+  totpCode: 'Код из приложения-аутентификатора',
+  totpSetupTitle: 'Подключите приложение-аутентификатор',
+  totpSetupText: 'Это первый вход. Установите Google Authenticator или Microsoft Authenticator, добавьте аккаунт вручную этим ключом и введите код из приложения. Ключ показывается один раз.',
+  totpKey: 'Ключ',
+  totpOpen: 'Открыть в приложении',
   logout: 'Выйти',
   theme: 'Тема',
   nav: {
@@ -73,6 +78,11 @@ const uz: Dict = {
   code: 'SMS kodi',
   signIn: 'Kirish',
   notStaff: 'Bu raqamga panelga ruxsat yoʻq',
+  totpCode: 'Autentifikator ilovasidagi kod',
+  totpSetupTitle: 'Autentifikator ilovasini ulang',
+  totpSetupText: 'Bu birinchi kirish. Google Authenticator yoki Microsoft Authenticator oʻrnating, hisobni shu kalit bilan qoʻlda qoʻshing va ilovadagi kodni kiriting. Kalit bir marta koʻrsatiladi.',
+  totpKey: 'Kalit',
+  totpOpen: 'Ilovada ochish',
   logout: 'Chiqish',
   theme: 'Mavzu',
   nav: {

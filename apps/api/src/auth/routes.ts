@@ -11,7 +11,7 @@ const MAX_ATTEMPTS = 5;
 const SESSION_DAYS = 90;
 const MAX_CODES_PER_HOUR = 5;
 /** Stricter per-IP limits for the login endpoints (on top of the global limit). */
-const AUTH_IP_LIMIT = { rateLimit: { max: 5, timeWindow: '1 minute' } };
+export const AUTH_IP_LIMIT = { rateLimit: { max: 5, timeWindow: '1 minute' } };
 
 const SMS_TEXT: Record<string, (code: string) => string> = {
   uz: (c) => `Kirish kodi: ${c}. Hech kimga aytmang.`,
@@ -23,6 +23,34 @@ interface Deps {
   db: pg.Pool;
   sms: SmsSender;
   authSecret: string;
+}
+
+/**
+ * Checks an SMS login code and uses it up. The attempt is counted atomically BEFORE comparing, so
+ * parallel requests cannot get more than MAX_ATTEMPTS guesses at one code; only one request can
+ * consume it. Shared by the app login and the staff panel's first step.
+ */
+export async function consumeLoginCode(
+  db: pg.Pool, authSecret: string, phone: string, code: string,
+): Promise<{ language: string } | { error: 'code_invalid_or_expired' | 'wrong_code' }> {
+  const { rows } = await db.query<{ id: string; code_hash: string; language: string }>(
+    `UPDATE auth_codes SET attempts = attempts + 1
+      WHERE id = (SELECT id FROM auth_codes
+                   WHERE phone = $1 AND consumed_at IS NULL AND expires_at > now()
+                   ORDER BY created_at DESC LIMIT 1)
+        AND attempts < $2
+      RETURNING id, code_hash, language`,
+    [phone, MAX_ATTEMPTS],
+  );
+  const entry = rows[0];
+  if (!entry) return { error: 'code_invalid_or_expired' };
+  if (!safeEqualHex(entry.code_hash, hashCode(authSecret, phone, code))) return { error: 'wrong_code' };
+  const consumed = await db.query(
+    'UPDATE auth_codes SET consumed_at = now() WHERE id = $1 AND consumed_at IS NULL',
+    [entry.id],
+  );
+  if (!consumed.rowCount) return { error: 'code_invalid_or_expired' };
+  return { language: entry.language };
 }
 
 export async function authRoutes(app: FastifyInstance, { db, sms, authSecret }: Deps): Promise<void> {
@@ -95,30 +123,9 @@ export async function authRoutes(app: FastifyInstance, { db, sms, authSecret }: 
       const phone = normalizeUzPhone(request.body.phone);
       if (!phone) return reply.code(400).send({ error: 'invalid_phone' });
 
-      // Count the attempt atomically BEFORE comparing, so parallel requests
-      // cannot get more than MAX_ATTEMPTS guesses at one code.
-      const { rows } = await db.query<{ id: string; code_hash: string; language: string }>(
-        `UPDATE auth_codes SET attempts = attempts + 1
-          WHERE id = (SELECT id FROM auth_codes
-                       WHERE phone = $1 AND consumed_at IS NULL AND expires_at > now()
-                       ORDER BY created_at DESC LIMIT 1)
-            AND attempts < $2
-          RETURNING id, code_hash, language`,
-        [phone, MAX_ATTEMPTS],
-      );
-      const entry = rows[0];
-      if (!entry) return reply.code(400).send({ error: 'code_invalid_or_expired' });
-
-      if (!safeEqualHex(entry.code_hash, hashCode(authSecret, phone, request.body.code))) {
-        return reply.code(400).send({ error: 'wrong_code' });
-      }
-
-      // Single use: only one request can consume the code.
-      const consumed = await db.query(
-        'UPDATE auth_codes SET consumed_at = now() WHERE id = $1 AND consumed_at IS NULL',
-        [entry.id],
-      );
-      if (!consumed.rowCount) return reply.code(400).send({ error: 'code_invalid_or_expired' });
+      const checked = await consumeLoginCode(db, authSecret, phone, request.body.code);
+      if ('error' in checked) return reply.code(400).send({ error: checked.error });
+      const entry = checked;
       const user = await db.query<{ id: string; phone: string; roles: string[]; language: string; name: string | null }>(
         // The language picked on the login screen wins, also for returning users.
         `INSERT INTO users (phone, language) VALUES ($1, $2)
@@ -138,7 +145,8 @@ export async function authRoutes(app: FastifyInstance, { db, sms, authSecret }: 
   );
 
   app.post('/auth/logout', { preHandler: requireUser }, async (request, reply) => {
-    const token = request.headers.authorization!.slice('Bearer '.length).trim();
+    if (!request.headers.authorization?.startsWith('Bearer ')) return reply.code(400).send({ error: 'use_staff_logout' });
+    const token = request.headers.authorization.slice('Bearer '.length).trim();
     await db.query('UPDATE sessions SET revoked_at = now() WHERE token_hash = $1', [hashToken(token)]);
     return reply.code(204).send();
   });

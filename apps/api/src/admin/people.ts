@@ -249,8 +249,36 @@ export async function adminPeopleRoutes(app: FastifyInstance, { db, cityCode }: 
         [request.params.id, roles],
       );
       if (!rows[0]) throw new HttpError(404, 'not_found');
+      // Staff who lose a role lose their open panel sessions at once.
+      if (!roles.some((r) => r === 'admin' || r === 'support')) {
+        await db.query(`UPDATE sessions SET revoked_at = now() WHERE user_id = $1 AND kind = 'staff' AND revoked_at IS NULL`, [request.params.id]);
+      }
       await audit(db, request, 'roles_changed', { type: 'user', id: request.params.id }, { roles });
       return rows[0];
+    },
+  );
+
+  // A staff member lost the phone with their authenticator: an admin clears it, the next sign-in
+  // sets up a new one (after the SMS code). Their open panel sessions end. Not for oneself.
+  app.post<{ Params: { id: string }; Body: { reason: string } }>(
+    '/admin/users/:id/reset-2fa',
+    {
+      preHandler: requireAdmin,
+      schema: {
+        params: uuidParams,
+        body: { type: 'object', required: ['reason'], additionalProperties: false, properties: { reason: { type: 'string', minLength: 3, maxLength: 500 } } },
+      },
+    },
+    async (request, reply) => {
+      if (request.params.id === request.user!.id) throw new HttpError(409, 'not_yourself');
+      const { rowCount } = await db.query(
+        `UPDATE users SET totp_secret_enc = NULL, totp_enabled_at = NULL, totp_last_step = NULL WHERE id = $1 AND deleted_at IS NULL`,
+        [request.params.id],
+      );
+      if (!rowCount) throw new HttpError(404, 'not_found');
+      await db.query(`UPDATE sessions SET revoked_at = now() WHERE user_id = $1 AND kind = 'staff' AND revoked_at IS NULL`, [request.params.id]);
+      await audit(db, request, 'staff_2fa_reset', { type: 'user', id: request.params.id }, { reason: request.body.reason });
+      return reply.code(204).send();
     },
   );
 }

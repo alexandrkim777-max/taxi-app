@@ -2,7 +2,7 @@
 // language and theme switch. Views live in ./views.
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { api, DEMO, getToken, setToken } from './api';
+import { api, DEMO, setSignedOutHandler } from './api';
 import { DICTS, type Lang } from './i18n';
 import { AppCtx, type Ctx, type Me } from './ui';
 import { Login } from './views/Login';
@@ -62,8 +62,9 @@ export function App() {
   }, [theme]);
 
   useEffect(() => {
-    if (!getToken()) { setChecking(false); return; }
+    setSignedOutHandler(() => setMe(null));
     api<Me>('/me').then((u) => setMe(isStaff(u) ? u : null), () => setMe(null)).finally(() => setChecking(false));
+    return () => setSignedOutHandler(null);
   }, []);
 
   const refreshCounts = useCallback(() => {
@@ -90,7 +91,7 @@ export function App() {
 
   if (checking) return null;
   if (!me || !ctx) {
-    return <Login lang={lang} setLang={setLang} onSignedIn={(u, token) => { setToken(token); setMe(u); }} />;
+    return <Login lang={lang} setLang={setLang} onSignedIn={(u) => setMe(u)} />;
   }
 
   const active = (PARENT[route.view] ?? route.view) as NavKey;
@@ -128,7 +129,7 @@ export function App() {
           <div className="rail-foot">
             <span className="who">{me.name ?? me.phone} · {me.roles.filter((r) => r === 'admin' || r === 'support').join(', ')}</span>
             {controls}
-            {!DEMO && <button type="button" className="btn small" onClick={() => { setToken(null); setMe(null); }}>{t.logout}</button>}
+            {!DEMO && <button type="button" className="btn small" onClick={() => { api('/staff/auth/logout', { body: {} }).catch(() => {}).finally(() => setMe(null)); }}>{t.logout}</button>}
           </div>
         </nav>
         <header className="topbar">

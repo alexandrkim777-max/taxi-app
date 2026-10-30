@@ -192,6 +192,9 @@ export async function mockApi(method: string, fullPath: string, body: any): Prom
   if (is('GET', '/me')) return ok(me);
   if (is('POST', '/auth/request-code')) return { status: 204, body: {} };
   if (is('POST', '/auth/verify')) return ok({ token: 'demo', user: me });
+  if (is('POST', '/staff/auth/verify')) return ok({ next: 'totp', ticket: 'demo' });
+  if (is('POST', '/staff/auth/totp')) return ok({ user: me });
+  if (is('POST', '/staff/auth/logout')) return { status: 204, body: {} };
   if (is('GET', '/admin/dashboard')) return ok(dashboard());
 
   if (is('GET', '/admin/drivers')) return ok(drivers.filter((d) => d.status === (q.get('status') ?? 'pending')).map(withMissing));

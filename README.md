@@ -44,6 +44,10 @@ Tests: `npm test` (the API integration tests need a migrated database at `DATABA
 | --- | --- | --- | --- |
 | POST | `/auth/request-code` | anyone | Language (uz / ru / en, chosen on the first screen) + phone; sends a 6-digit SMS code; one per phone per 60 s, valid 5 min |
 | POST | `/auth/verify` | anyone | Checks the code (max 5 attempts), returns a bearer token (90 days) |
+| POST | `/staff/auth/verify` | staff | Panel sign-in step 1: SMS code → ticket (and a new authenticator key on the first sign-in) |
+| POST | `/staff/auth/totp` | staff | Step 2: authenticator code → httpOnly session cookie (30 min idle, 12 h max) |
+| POST | `/staff/auth/logout` | staff | Ends the panel session |
+| POST | `/admin/users/:id/reset-2fa` | admin | Clears someone's authenticator (lost phone), ends their panel sessions |
 | POST | `/auth/logout` | user | Revokes the current token |
 | GET / PATCH | `/me` | user | Current user; change language or name |
 | POST | `/drivers/apply` | user | Becomes a driver (status `pending`) |

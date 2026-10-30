@@ -122,12 +122,21 @@ every item below has a regression test in `apps/api/test/security.test.ts` or th
 ## Staff panel (web)
 
 - Served from the API's own domain; no CORS, no third-party scripts except Google Fonts.
-- The session token is kept in `sessionStorage` (cleared when the tab closes), never in a cookie or URL.
+- Sign-in is two factors: the SMS code, then a code from an authenticator app (TOTP, RFC 6238), set up on
+  the first sign-in. A code is accepted once (the last used 30 s step is stored); a sign-in ticket allows
+  5 tries in 5 minutes. An admin can reset another staff member's authenticator (audited, ends their sessions).
+- The panel session is an `__Host-` cookie: `HttpOnly; Secure; SameSite=Strict; Path=/`, no Domain. Page
+  scripts cannot read it. It ends after 30 minutes idle or 12 hours, on logout, and when the staff role is removed.
+- CSRF: writes with the cookie must carry `X-Requested-With: taxi-admin` (another site cannot add it
+  without a CORS preflight, which we never allow), on top of SameSite=Strict.
+- Phone-app bearer tokens are refused on every staff endpoint (`staff_session_required`), even for an
+  admin's own phone: a stolen app token or an intercepted SMS alone does not open the panel.
 - Only `admin` / `support` accounts are let in; every screen calls the same role-checked API, so hiding a
-  button is never the only protection.
+  button is never the only protection. Sign-ins and authenticator set-ups are in the audit log.
 - The demo build answers from an in-browser mock; the real build replaces it with an empty stub, so sample
   data never ships. Pages are marked `noindex`.
-- To do: move the token to an httpOnly cookie with CSRF protection and add 2FA before launch.
+- Authenticator secrets are encrypted with a key derived from `AUTH_SECRET`; rotating it means every staff
+  member sets up the authenticator again.
 
 ## Passenger app
 
@@ -202,7 +211,7 @@ The API refuses to start in production if:
 - Payme / Click / Uzum adapters (webhook auth, checkout, card tokens), fiscal operator, driver payouts, refunds.
 - Move file storage to S3-compatible storage in Uzbekistan with encryption at rest; strip photo metadata (EXIF/GPS).
 - Hosting in Uzbekistan, TLS, database backups and encryption at rest.
-- 2FA for staff accounts; staff panel only from allowed networks / VPN.
+- Staff panel only from allowed networks / VPN.
 - Penetration test before the public launch.
 - Mask phone numbers between passenger and driver (call through a proxy number) before calls are added.
 - Encrypt the trip history at rest and set a retention period for raw positions.

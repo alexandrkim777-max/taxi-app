@@ -6,6 +6,7 @@ import type { RouteProvider } from './routing/index.ts';
 import { loadUser } from './auth/session.ts';
 import { HttpError } from './lib/tx.ts';
 import { authRoutes } from './auth/routes.ts';
+import { staffAuthRoutes } from './auth/staff.ts';
 import { driverRoutes } from './drivers/routes.ts';
 import { tariffRoutes } from './tariffs/routes.ts';
 import { dispatchRoutes } from './dispatch/routes.ts';
@@ -79,6 +80,7 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
 
   setFileService(deps.files);
   app.decorateRequest('user', null);
+  app.decorateRequest('staffSession', false);
   app.addHook('preHandler', async (request) => {
     await loadUser(deps.db, request);
   });
@@ -89,6 +91,7 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
   });
 
   await app.register(authRoutes, { db: deps.db, sms: deps.sms, authSecret: deps.authSecret });
+  await app.register(staffAuthRoutes, { db: deps.db, authSecret: deps.authSecret });
   await app.register(driverRoutes, { db: deps.db, fileBaseUrl: deps.fileBaseUrl, cityCode: deps.cityCode });
   await app.register(tariffRoutes, { db: deps.db, routes: deps.routes, cityCode: deps.cityCode });
   await app.register(dispatchRoutes, { db: deps.db });
