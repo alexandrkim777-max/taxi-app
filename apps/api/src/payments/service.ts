@@ -252,7 +252,9 @@ export class PaymentService {
     if (!card) return 'failed';
     return this.chargeSavedCard({
       type: 'ride', rideId, userId: r.passenger_id, cardId: card, driverId: r.driver_id, amountTiyin: due,
-      description: 'Ride', key: Number(r.paid) > 0 ? `ride_extra:${rideId}` : `ride:${rideId}`,
+      // The key names the state being paid for: callers racing on the same state share one
+      // charge; a later price change (paid has moved on) is a new charge, never swallowed by an old one.
+      description: 'Ride', key: Number(r.paid) > 0 ? `ride_extra:${rideId}:${r.paid}` : `ride:${rideId}`,
     });
   }
 
