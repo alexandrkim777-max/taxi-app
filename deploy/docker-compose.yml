@@ -1,0 +1,78 @@
+# Test server: everything on one machine. Only Caddy is reachable from the internet (ports 80/443);
+# the database, routing and address search are on the internal network only.
+name: taxi
+
+services:
+  caddy:
+    image: caddy:2.8.4-alpine
+    restart: unless-stopped
+    ports: ['80:80', '443:443']
+    environment:
+      DOMAIN: ${DOMAIN}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - admin:/srv/admin:ro
+      - caddy_data:/data
+    depends_on: [api]
+
+  api:
+    build: { context: .., dockerfile: deploy/Dockerfile }
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      DATABASE_URL: postgres://taxi:${POSTGRES_PASSWORD}@db:5432/taxi
+      ROUTE_PROVIDER: osrm
+      OSRM_URL: http://osrm:5000
+      GEO_PROVIDER: nominatim
+      NOMINATIM_URL: http://nominatim:8080
+      FILE_STORAGE_DIR: /data/files
+      TRUST_PROXY: 'true'
+      PORT: '3000'
+    volumes:
+      - files:/data/files
+      - admin:/srv/admin-out
+    # Copies the freshly built staff panel to the volume Caddy serves, then starts the API.
+    command: sh -c "cp -r /srv/admin/. /srv/admin-out/ && node --experimental-strip-types --no-warnings src/migrate.ts && exec node --experimental-strip-types --no-warnings src/server.ts"
+    depends_on:
+      db: { condition: service_healthy }
+
+  db:
+    image: postgis/postgis:16-3.4
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: taxi
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: taxi
+    volumes: [pgdata:/var/lib/postgresql/data]
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U taxi']
+      interval: 5s
+      retries: 30
+
+  # Car routes and times on OpenStreetMap data (prepared once by setup.sh into ./data/osrm).
+  osrm:
+    image: ghcr.io/project-osrm/osrm-backend:v5.27.1
+    restart: unless-stopped
+    command: osrm-routed --algorithm mld /data/uzbekistan-latest.osrm
+    volumes: ['./data/osrm:/data:ro']
+
+  # Address search on OpenStreetMap data; the first start imports Uzbekistan (about an hour).
+  nominatim:
+    image: mediagis/nominatim:4.4
+    restart: unless-stopped
+    environment:
+      PBF_PATH: /osm/uzbekistan-latest.osm.pbf
+      REPLICATION_URL: https://download.geofabrik.de/asia/uzbekistan-updates/
+      NOMINATIM_PASSWORD: ${NOMINATIM_PASSWORD}
+      IMPORT_STYLE: address
+    volumes:
+      - nominatim:/var/lib/postgresql/16/main
+      - ./data/osm:/osm:ro
+    shm_size: 1g
+
+volumes:
+  pgdata:
+  files:
+  admin:
+  caddy_data:
+  nominatim:

@@ -43,6 +43,11 @@ jobs:
       - run: npm run db:migrate
       - run: npm run typecheck
       - run: npm test
+      - name: The server starts and answers (catches what unit tests do not load)
+        run: |
+          PORT=3999 PUSH_PROVIDER=log node --experimental-strip-types --no-warnings apps/api/src/server.ts > server.log 2>&1 &
+          for i in $(seq 1 30); do curl -sf localhost:3999/health && break; sleep 1; done
+          curl -sf localhost:3999/health || (cat server.log; exit 1)
       - name: Admin panel builds without demo data
         run: |
           npm run build --workspace apps/admin

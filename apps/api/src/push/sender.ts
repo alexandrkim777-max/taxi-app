@@ -21,7 +21,10 @@ export interface PushSender {
 
 export class LogPushSender implements PushSender {
   readonly name = 'log';
-  constructor(private readonly log: (msg: string) => void = () => {}) {}
+  private readonly log: (msg: string) => void;
+  constructor(log: (msg: string) => void = () => {}) {
+    this.log = log;
+  }
   async send(messages: PushMessage[]): Promise<PushResult[]> {
     for (const m of messages) this.log(`push (not sent, dev): ${String(m.data.kind)} to ${m.to.slice(0, 22)}…`);
     return messages.map(() => ({ ok: true }));

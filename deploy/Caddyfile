@@ -1,0 +1,35 @@
+# HTTPS certificates are issued automatically for {$DOMAIN} (e.g. 203.0.113.7.sslip.io until we
+# have our own domain). The apps talk to the API at the root; the staff panel lives under /admin
+# and calls the same API under /api.
+{$DOMAIN} {
+	encode zstd gzip
+
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		X-Content-Type-Options nosniff
+		Referrer-Policy no-referrer
+		-Server
+	}
+
+	handle_path /api/* {
+		reverse_proxy api:3000
+	}
+
+	redir /admin /admin/
+	handle_path /admin/* {
+		root * /srv/admin
+		header X-Robots-Tag "noindex, nofollow"
+		header X-Frame-Options DENY
+		try_files {path} /index.html
+		file_server
+	}
+
+	handle {
+		reverse_proxy api:3000
+	}
+
+	log {
+		output stdout
+		format console
+	}
+}
