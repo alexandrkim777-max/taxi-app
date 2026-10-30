@@ -99,7 +99,14 @@ jobs:
           if [ "$CODE" != "0" ]; then
             { echo; echo '<details><summary>End of the logs</summary>'; echo; echo '```'
               tail -n 60 build.err 2>/dev/null
-              for u in $(cat logs.txt); do curl -sfL "$u" | tail -n 120; done
+              for u in $(cat logs.txt); do curl -sfL "$u" -o log.part || continue; (gunzip -c log.part 2>/dev/null || cat log.part) > log.txt; node -e '
+                const lines = require("fs").readFileSync("log.txt", "utf8").split("\n").filter(Boolean).map((l) => { try { return JSON.parse(l); } catch { return { msg: l }; } });
+                const msgs = lines.map((l) => `${l.phase ? "[" + l.phase + "] " : ""}${l.msg ?? ""}`);
+                // The useful part of a Gradle failure: "What went wrong" and the errors before it.
+                const i = msgs.findIndex((m) => m.includes("What went wrong"));
+                const errs = msgs.filter((m) => /error:|e: |FAILURE|Could not|not found|Execution failed/i.test(m)).slice(-40);
+                console.log((i >= 0 ? msgs.slice(i, i + 40) : []).concat(["--- errors ---"], errs, ["--- last lines ---"], msgs.slice(-40)).join("\n").slice(-60000));
+              '; done
               echo '```'; echo '</details>'; } >> report.md
           fi
           ISSUE=$(gh issue list --state all --search "EAS builds in:title" --json number --jq '.[0].number')
