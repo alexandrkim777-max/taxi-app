@@ -39,14 +39,17 @@ const CLASSES = [
   { code: 'business', name: { uz: 'Biznes', ru: 'Бизнес', en: 'Business' }, seats: 4, k: 2, coefficient: 1 },
   { code: 'minivan', name: { uz: 'Miniven', ru: 'Минивэн', en: 'Minivan' }, seats: 7, k: 1.5, coefficient: 1 },
 ];
-// Who is around in the demo: economy has a cheap driver far away and a dearer one close by (two
-// options), comfort and business one sensible option each, no minivan free (the "no cars" case).
+// Who is around in the demo: economy, comfort and business each have a cheaper car further away and a
+// dearer one close by (two options); one minivan (a single "Best option").
 const DRIVERS = [
   { name: 'Jasur', rating: 4.93, car: 'Chevrolet Cobalt', color: { uz: 'oq', ru: 'белый', en: 'white' }, plate: '01A123BC', share: 0.82, pickupMin: 9, cls: 'economy', highlights: [{ code: 'careful_driving', count: 41 }, { code: 'clean_car', count: 33 }] },
   { name: 'Dilshod', rating: 4.88, car: 'Chevrolet Gentra', color: { uz: 'kumush', ru: 'серебристый', en: 'silver' }, plate: '01B456CD', share: 0.9, pickupMin: 6, cls: 'economy', highlights: [{ code: 'polite', count: 27 }] },
   { name: 'Bekzod', rating: null, car: 'Chevrolet Nexia 3', color: { uz: 'oq', ru: 'белый', en: 'white' }, plate: '01D246EF', share: 0.97, pickupMin: 2, cls: 'economy', highlights: [] },
   { name: 'Rustam', rating: 4.97, car: 'Kia K5', color: { uz: 'qora', ru: 'чёрный', en: 'black' }, plate: '01C789DE', share: 0.92, pickupMin: 5, cls: 'comfort', highlights: [{ code: 'comfortable', count: 52 }, { code: 'knows_city', count: 30 }] },
-  { name: 'Timur', rating: 4.99, car: 'Mercedes-Benz E-Class', color: { uz: 'qora', ru: 'чёрный', en: 'black' }, plate: '01E777FA', share: 1, pickupMin: 7, cls: 'business', highlights: [{ code: 'polite', count: 64 }] },
+  { name: 'Sardor', rating: 4.91, car: 'Chevrolet Malibu', color: { uz: 'oq', ru: 'белый', en: 'white' }, plate: '01F135GH', share: 0.83, pickupMin: 10, cls: 'comfort', highlights: [{ code: 'quiet_ride', count: 18 }] },
+  { name: 'Timur', rating: 4.99, car: 'Mercedes-Benz E-Class', color: { uz: 'qora', ru: 'чёрный', en: 'black' }, plate: '01E777FA', share: 1, pickupMin: 3, cls: 'business', highlights: [{ code: 'polite', count: 64 }] },
+  { name: 'Anvar', rating: 4.95, car: 'BMW 5', color: { uz: 'kulrang', ru: 'серый', en: 'grey' }, plate: '01G864HJ', share: 0.84, pickupMin: 11, cls: 'business', highlights: [{ code: 'comfortable', count: 21 }] },
+  { name: 'Ulugʻbek', rating: 4.9, car: 'Kia Carnival', color: { uz: 'qora', ru: 'чёрный', en: 'black' }, plate: '01H502KL', share: 0.9, pickupMin: 6, cls: 'minivan', highlights: [{ code: 'helped_luggage', count: 15 }] },
 ];
 type Driver = (typeof DRIVERS)[number];
 

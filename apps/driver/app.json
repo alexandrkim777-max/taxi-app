@@ -33,7 +33,10 @@
         "FOREGROUND_SERVICE",
         "FOREGROUND_SERVICE_LOCATION",
         "CAMERA"
-      ]
+      ],
+      "adaptiveIcon": {
+        "backgroundColor": "#0B6A70"
+      }
     },
     "plugins": [
       [
@@ -60,6 +63,11 @@
         "projectId": "244b1270-086c-42dd-8faa-dcb0f375512d"
       }
     },
-    "owner": "alexandr888s-team"
+    "owner": "alexandr888s-team",
+    "splash": {
+      "backgroundColor": "#0B6A70",
+      "resizeMode": "contain"
+    },
+    "backgroundColor": "#F7F2EA"
   }
 }

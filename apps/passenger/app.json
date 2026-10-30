@@ -23,7 +23,10 @@
       "permissions": [
         "ACCESS_FINE_LOCATION",
         "ACCESS_COARSE_LOCATION"
-      ]
+      ],
+      "adaptiveIcon": {
+        "backgroundColor": "#0B6A70"
+      }
     },
     "plugins": [
       "@maplibre/maplibre-react-native",
@@ -45,6 +48,11 @@
         "projectId": "3f453d3c-79c2-4901-95c6-11a3e86971fa"
       }
     },
-    "owner": "alexandr888s-team"
+    "owner": "alexandr888s-team",
+    "splash": {
+      "backgroundColor": "#0B6A70",
+      "resizeMode": "contain"
+    },
+    "backgroundColor": "#F7F2EA"
   }
 }
