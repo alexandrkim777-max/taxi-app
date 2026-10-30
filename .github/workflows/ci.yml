@@ -74,3 +74,5 @@ jobs:
       - run: npm ci
       - run: npm run tokens
       - run: npx tsc --noEmit
+      - name: The Android JavaScript bundle builds (what the phone build packs)
+        run: npx expo export --platform android --output-dir /tmp/bundle

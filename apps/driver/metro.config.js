@@ -5,6 +5,8 @@ const path = require('path');
 
 const config = getDefaultConfig(__dirname);
 config.watchFolders = [path.resolve(__dirname, '../../packages/shared')];
+// Shared files live outside the app: their imports (and Babel helpers) resolve from the app's node_modules.
+config.resolver.nodeModulesPaths = [path.resolve(__dirname, 'node_modules')];
 
 const demo = process.env.EXPO_PUBLIC_DEMO === '1';
 const upstream = config.resolver.resolveRequest;
