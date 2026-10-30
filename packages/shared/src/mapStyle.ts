@@ -7,10 +7,21 @@ export interface MapPalette {
   brand: string; warm: string; success: string; surfaceCard: string; surfacePage: string;
 }
 
-/** tilesUrl: our tile server, e.g. https://maps.example.uz (serves /uzbekistan/{z}/{x}/{y}.pbf and /fonts). */
-export function mapStyle(p: MapPalette, tilesUrl: string, dark: boolean): Record<string, unknown> {
+/**
+ * Where the map data comes from:
+ * - `tilesUrl`: our own tile server (serves /uzbekistan/{z}/{x}/{y}.pbf and /fonts) — production;
+ * - `tileJsonUrl` + `glyphsUrl`: any OpenMapTiles-schema source described by TileJSON, e.g. the free
+ *   OpenFreeMap service, for test builds before our map server is up. Same data (OpenStreetMap), same look.
+ */
+export type MapSource = { tilesUrl: string } | { tileJsonUrl: string; glyphsUrl: string };
+
+export function mapStyle(p: MapPalette, source: MapSource, dark: boolean): Record<string, unknown> {
   const font = ['Noto Sans Regular'];
-  const fontBold = ['Noto Sans Medium'];
+  const fontBold = ['Noto Sans Bold'];
+  const tiles = 'tilesUrl' in source
+    ? { tiles: [`${source.tilesUrl}/uzbekistan/{z}/{x}/{y}.pbf`], minzoom: 0, maxzoom: 14 }
+    : { url: source.tileJsonUrl };
+  const glyphs = 'tilesUrl' in source ? `${source.tilesUrl}/fonts/{fontstack}/{range}.pbf` : source.glyphsUrl;
   const water = dark ? '#16303A' : '#BFD9DA';
   const park = dark ? '#18261E' : '#DCE7CF';
   const building = dark ? '#1F262F' : '#E4DACA';
@@ -35,9 +46,9 @@ export function mapStyle(p: MapPalette, tilesUrl: string, dark: boolean): Record
   return {
     version: 8,
     name: dark ? 'taxi-night' : 'taxi-day',
-    glyphs: `${tilesUrl}/fonts/{fontstack}/{range}.pbf`,
+    glyphs,
     sources: {
-      omt: { type: 'vector', tiles: [`${tilesUrl}/uzbekistan/{z}/{x}/{y}.pbf`], minzoom: 0, maxzoom: 14, attribution: '© OpenStreetMap contributors' },
+      omt: { type: 'vector', ...tiles, attribution: '© OpenStreetMap contributors' },
     },
     layers: [
       { id: 'background', type: 'background', paint: { 'background-color': p.surfaceSunken } },

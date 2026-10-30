@@ -24,7 +24,7 @@ curl -O https://download.geofabrik.de/asia/uzbekistan-latest.osm.pbf
 java -Xmx4g -jar planetiler.jar --osm-path=uzbekistan-latest.osm.pbf --output=uzbekistan.pmtiles
 
 # 3. Serve tiles + fonts
-martin --listen-addresses 0.0.0.0:3001 uzbekistan.pmtiles   # plus a /fonts folder with Noto Sans glyph PBFs
+martin --listen-addresses 0.0.0.0:3001 uzbekistan.pmtiles   # plus a /fonts folder with Noto Sans Regular / Bold glyph PBFs
 
 # 4. Routing
 docker run -v $PWD:/data osrm/osrm-backend osrm-extract -p /opt/car.lua /data/uzbekistan-latest.osm.pbf
@@ -38,6 +38,12 @@ docker run -e PBF_URL=https://download.geofabrik.de/asia/uzbekistan-latest.osm.p
 
 API settings: `ROUTE_PROVIDER=osrm OSRM_URL=http://maps:5000 GEO_PROVIDER=nominatim NOMINATIM_URL=http://maps:8080`.
 Apps: `EXPO_PUBLIC_TILES_URL=https://maps.<our-domain>`.
+
+## Test builds before the map server is up
+
+Set `EXPO_PUBLIC_TILEJSON_URL=https://tiles.openfreemap.org/planet` and
+`EXPO_PUBLIC_GLYPHS_URL=https://tiles.openfreemap.org/fonts/{fontstack}/{range}.pbf` (OpenFreeMap: free,
+OpenStreetMap data in the same OpenMapTiles schema). Production uses `EXPO_PUBLIC_TILES_URL` (our server).
 
 ## Rules
 

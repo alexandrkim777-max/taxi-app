@@ -4,18 +4,21 @@
 import { useEffect, useMemo, useRef } from 'react';
 import { View } from 'react-native';
 import { Camera, LineLayer, MapView, MarkerView, ShapeSource, type CameraRef } from '@maplibre/maplibre-react-native';
-import { mapStyle } from '../../../../packages/shared/src/mapStyle.ts';
+import { mapStyle, type MapSource } from '../../../../packages/shared/src/mapStyle.ts';
 import { useTheme } from '../theme';
 import { PinView } from './Pin';
 import type { MapProps } from './types';
 
-const TILES_URL = (process.env.EXPO_PUBLIC_TILES_URL ?? 'http://localhost:3001').replace(/\/$/, '');
+// Our tile server in production; a TileJSON source (e.g. OpenFreeMap) in test builds before it is up.
+const SOURCE: MapSource = process.env.EXPO_PUBLIC_TILEJSON_URL
+  ? { tileJsonUrl: process.env.EXPO_PUBLIC_TILEJSON_URL, glyphsUrl: process.env.EXPO_PUBLIC_GLYPHS_URL ?? '' }
+  : { tilesUrl: (process.env.EXPO_PUBLIC_TILES_URL ?? 'http://localhost:3001').replace(/\/$/, '') };
 const TASHKENT: [number, number] = [69.2797, 41.3111];
 
 export function Map({ pins, line, bottomInset = 0, style, onPinPress, onCenterChange, center }: MapProps) {
   const { c, dark } = useTheme();
   const camera = useRef<CameraRef>(null);
-  const styleJson = useMemo(() => JSON.stringify(mapStyle(c, TILES_URL, dark)), [c, dark]);
+  const styleJson = useMemo(() => JSON.stringify(mapStyle(c, SOURCE, dark)), [c, dark]);
 
   // Fit everything that matters (pickup, destination, car) above the bottom sheet.
   const key = pins.filter((p) => p.kind !== 'entrance').map((p) => `${p.lat.toFixed(4)},${p.lng.toFixed(4)}`).join('|');

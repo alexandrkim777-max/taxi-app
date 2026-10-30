@@ -1,0 +1,30 @@
+{
+  "cli": {
+    "version": ">= 16.0.0",
+    "appVersionSource": "remote"
+  },
+  "build": {
+    "demo": {
+      "distribution": "internal",
+      "android": { "buildType": "apk" },
+      "env": {
+        "EXPO_PUBLIC_DEMO": "1",
+        "EXPO_PUBLIC_TILEJSON_URL": "https://tiles.openfreemap.org/planet",
+        "EXPO_PUBLIC_GLYPHS_URL": "https://tiles.openfreemap.org/fonts/{fontstack}/{range}.pbf"
+      }
+    },
+    "preview": {
+      "distribution": "internal",
+      "android": { "buildType": "apk" },
+      "env": {
+        "EXPO_PUBLIC_API_URL": "https://set-by-the-build-workflow",
+        "EXPO_PUBLIC_TILEJSON_URL": "https://tiles.openfreemap.org/planet",
+        "EXPO_PUBLIC_GLYPHS_URL": "https://tiles.openfreemap.org/fonts/{fontstack}/{range}.pbf"
+      }
+    },
+    "production": {
+      "autoIncrement": true,
+      "android": { "buildType": "app-bundle" }
+    }
+  }
+}

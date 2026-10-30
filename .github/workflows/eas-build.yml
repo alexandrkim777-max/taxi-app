@@ -1,0 +1,108 @@
+# Phone builds on Expo's build servers (EAS). Started by pushing a tag
+#   build/<profile>/<app>/<anything>     e.g. build/demo/both/1, build/preview/driver/7
+# or by hand from the Actions tab. Results (install link, or the end of the log on failure) are
+# posted as a comment on the "EAS builds" issue.
+# Needs the repository secret EXPO_TOKEN (a robot token with the Developer role).
+name: EAS build
+
+on:
+  push:
+    tags: ['build/**']
+  workflow_dispatch:
+    inputs:
+      app: { description: 'driver, passenger or both', required: true, default: both }
+      profile: { description: 'demo, preview or production', required: true, default: demo }
+      api_url: { description: 'API address for preview builds (https://...)', required: false }
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  plan:
+    runs-on: ubuntu-24.04
+    outputs:
+      apps: ${{ steps.p.outputs.apps }}
+      profile: ${{ steps.p.outputs.profile }}
+    steps:
+      - id: p
+        env:
+          REF: ${{ github.ref_name }}
+          IN_APP: ${{ inputs.app }}
+          IN_PROFILE: ${{ inputs.profile }}
+        run: |
+          if [ "${{ github.event_name }}" = "push" ]; then
+            PROFILE=$(echo "$REF" | cut -d/ -f2); APP=$(echo "$REF" | cut -d/ -f3)
+          else
+            PROFILE="$IN_PROFILE"; APP="$IN_APP"
+          fi
+          case "$PROFILE" in demo|preview|production) ;; *) echo "unknown profile $PROFILE"; exit 1;; esac
+          case "$APP" in both) APPS='["driver","passenger"]';; driver|passenger) APPS="[\"$APP\"]";; *) echo "unknown app $APP"; exit 1;; esac
+          echo "apps=$APPS" >> "$GITHUB_OUTPUT"
+          echo "profile=$PROFILE" >> "$GITHUB_OUTPUT"
+
+  build:
+    needs: plan
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        app: ${{ fromJSON(needs.plan.outputs.apps) }}
+    defaults:
+      run:
+        working-directory: apps/${{ matrix.app }}
+    env:
+      EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+      PROFILE: ${{ needs.plan.outputs.profile }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: apps/${{ matrix.app }}/package-lock.json
+      - run: npm ci
+      - name: API address for preview builds
+        if: needs.plan.outputs.profile == 'preview'
+        env:
+          API_URL: ${{ inputs.api_url || vars.STAGING_API_URL }}
+        run: |
+          case "$API_URL" in https://*) ;; *) echo "preview builds need an https API address (input api_url or repo variable STAGING_API_URL)"; exit 1;; esac
+          node -e "const f='eas.json',j=require('./'+f);j.build.preview.env.EXPO_PUBLIC_API_URL=process.env.API_URL;require('fs').writeFileSync(f,JSON.stringify(j,null,2))"
+      - name: Build on EAS (Android)
+        id: eas
+        run: |
+          set +e
+          npx --yes eas-cli@27.2.0 build --platform android --profile "$PROFILE" --non-interactive --wait --json > build.json 2> build.err
+          echo "code=$?" >> "$GITHUB_OUTPUT"
+          tail -n 40 build.err
+          exit 0
+      - name: Report on the "EAS builds" issue
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          APP: ${{ matrix.app }}
+          CODE: ${{ steps.eas.outputs.code }}
+        run: |
+          node -e '
+            const fs = require("fs");
+            let b = {}; try { b = JSON.parse(fs.readFileSync("build.json", "utf8"))[0] || {}; } catch {}
+            const lines = [`**${process.env.APP}** · profile \`${process.env.PROFILE}\` · ${process.env.GITHUB_REF_NAME} · ${(process.env.GITHUB_SHA || "").slice(0, 7)}`];
+            lines.push(`Status: **${b.status || "failed before the build started"}** (exit ${process.env.CODE})`);
+            if (b.id) lines.push(`Build page: https://expo.dev/accounts/alexandr888s-team/projects/taxi-${process.env.APP}/builds/${b.id}`);
+            if (b.artifacts && b.artifacts.buildUrl) lines.push(`Install (APK): ${b.artifacts.buildUrl}`);
+            if (b.error) lines.push("Error: " + JSON.stringify(b.error));
+            fs.writeFileSync("report.md", lines.join("\n\n"));
+            fs.writeFileSync("logs.txt", (b.logFiles || []).join("\n"));
+          '
+          if [ "$CODE" != "0" ]; then
+            { echo; echo '<details><summary>End of the logs</summary>'; echo; echo '```'
+              tail -n 60 build.err 2>/dev/null
+              for u in $(cat logs.txt); do curl -sfL "$u" | tail -n 120; done
+              echo '```'; echo '</details>'; } >> report.md
+          fi
+          ISSUE=$(gh issue list --state all --search "EAS builds in:title" --json number --jq '.[0].number')
+          if [ -z "$ISSUE" ]; then ISSUE=$(gh issue create --title "EAS builds" --body "Results of phone builds (posted by the EAS build workflow)." | grep -o '[0-9]*$'); fi
+          gh issue comment "$ISSUE" --body-file report.md
+          [ "$CODE" = "0" ]
