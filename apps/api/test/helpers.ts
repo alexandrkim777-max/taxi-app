@@ -2,6 +2,7 @@
 // DATABASE_URL; tests are skipped when it is not set.
 
 import { after } from 'node:test';
+import { randomInt } from 'node:crypto';
 import assert from 'node:assert/strict';
 import pg from 'pg';
 import { buildApp } from '../src/app.ts';
@@ -40,12 +41,13 @@ class CapturingSms implements SmsSender {
 }
 
 /**
- * A phone number no other test has used recently: +998 0XXXXXXXX (no real operator code starts with 0,
- * so it can never be someone's number). Numbers run in sequence from a clock-based start that moves
- * 1009 numbers a second, so consecutive runs never reuse a number within a day. Random numbers used
- * to repeat now and then in a long run, and the one-SMS-a-minute limit then failed a test at random.
+ * A phone number no other test has used: +998 0XXXXXXXX (no real operator code starts with 0, so it can
+ * never be someone's number). Each test file (its own process) starts at a random point of the
+ * 100-million range and counts up, so files and runs never collide in practice (a few hundred numbers
+ * each). Fully random numbers used to repeat now and then and hit the one-SMS-a-minute limit; a
+ * clock-based start collided when CI started several files in the same second.
  */
-let phoneSeq = (Math.floor(Date.now() / 1000) * 1009) % 100_000_000;
+let phoneSeq = randomInt(0, 100_000_000);
 export function randomPhone(): string {
   phoneSeq = (phoneSeq + 1) % 100_000_000;
   return `+9980${String(phoneSeq).padStart(8, '0')}`;
