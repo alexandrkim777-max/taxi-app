@@ -264,12 +264,16 @@ test('races: parallel orders and parallel acceptances', { skip }, async () => {
   assert.deepEqual(choices.map((r) => r.statusCode).sort(), [200, 409], choices.map((r) => r.body).join(' | '));
   const chosenRide = choices[0]!.statusCode === 200 ? rideA : rideB;
 
-  // Accepting the same ride twice at once yields one acceptance.
+  // The same driver's accept arriving twice at once (a retried request): one acceptance, both
+  // answers say "accepted" with the same locked price.
   const accepts = await Promise.all([
     s.app.inject({ method: 'POST', url: `/rides/${chosenRide.id}/accept`, headers: driver }),
     s.app.inject({ method: 'POST', url: `/rides/${chosenRide.id}/accept`, headers: driver }),
   ]);
-  assert.equal(accepts.filter((r) => r.statusCode === 200).length, 1, accepts.map((r) => r.body).join(' | '));
+  assert.deepEqual(accepts.map((r) => r.statusCode), [200, 200], accepts.map((r) => r.body).join(' | '));
+  assert.equal(accepts[0]!.json().priceTiyin, accepts[1]!.json().priceTiyin);
+  const n = await db.query(`SELECT count(*)::int AS n FROM ride_events WHERE ride_id = $1 AND type = 'status:accepted'`, [chosenRide.id]);
+  assert.equal(n.rows[0].n, 1, 'accepted once');
   await s.app.close();
 });
 

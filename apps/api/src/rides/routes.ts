@@ -387,9 +387,11 @@ export async function rideRoutes(app: FastifyInstance, { db, routes, cityCode, p
           if (ctx.pausedUntil) throw new HttpError(423, 'paused', { pausedUntil: ctx.pausedUntil });
 
           const { rows: rides } = await tx.query<RideRow>(
-            `SELECT id, status FROM rides WHERE id = $1 AND deleted_at IS NULL FOR UPDATE`,
+            `SELECT id, status, driver_id FROM rides WHERE id = $1 AND deleted_at IS NULL FOR UPDATE`,
             [request.params.id],
           );
+          // A retry after a lost answer: this driver already has the ride.
+          if (rides[0] && rides[0].status !== 'created' && rides[0].driver_id === ctx.driverId) return;
           const { rows: offers } = await tx.query<{ id: string; price_tiyin: string; tariff_id: string }>(
             `SELECT id, price_tiyin, tariff_id FROM ride_offers
               WHERE ride_id = $1 AND driver_id = $2 AND status = 'chosen' AND expires_at > now()
@@ -467,10 +469,13 @@ export async function rideRoutes(app: FastifyInstance, { db, routes, cityCode, p
     async (request) => {
       const userId = request.user!.id;
       const next = request.body.status;
+      let repeated = false;
       await withTx(db, async (tx) => {
         const { ride, role } = await rideFor(tx, request.params.id, userId, true);
         // Only the assigned driver moves the ride forward.
         if (role !== 'driver') throw new HttpError(404, 'not_found');
+        // A retry after a lost answer (the phone dropped off the network): already done, nothing to repeat.
+        if (ride.status === next) { repeated = true; return; }
         if (!canTransition(ride.status, next)) throw new HttpError(409, 'invalid_transition');
         if (next === 'arrived') {
           // 'Arrived' starts the paid-cancellation clock, so it must be true: the driver's
@@ -517,7 +522,7 @@ export async function rideRoutes(app: FastifyInstance, { db, routes, cityCode, p
         await logEvent(tx, ride.id, `status:${next}`, 'driver', userId, { from: ride.status });
       });
       // Charged after the ride is committed as completed; a failed charge becomes a debt.
-      if (next === 'completed') await chargeRide(request.params.id);
+      if (next === 'completed' && !repeated) await chargeRide(request.params.id);
       return rideView(db, request.params.id, 'driver');
     },
   );
@@ -617,11 +622,17 @@ export async function rideRoutes(app: FastifyInstance, { db, routes, cityCode, p
       const userId = request.user!.id;
       const body = request.body ?? {};
       let role: Role = 'passenger';
+      let repeatedCancel = false;
       await withTx(db, async (tx) => {
         const found = await rideFor(tx, request.params.id, userId, true);
         role = found.role;
         const { ride } = found;
         if (body.noShow && role !== 'driver') throw new HttpError(400, 'no_show_is_for_drivers');
+        if (ride.status === 'cancelled') {
+          // A retry by the side that cancelled (the answer got lost): the same result, no second fee.
+          const { rows } = await tx.query<{ cancelled_by: string }>(`SELECT cancelled_by FROM rides WHERE id = $1`, [ride.id]);
+          if (rows[0]!.cancelled_by === role) { repeatedCancel = true; return; }
+        }
         // A ride in progress cannot be cancelled; it ends with completion.
         if (!canTransition(ride.status, 'cancelled')) throw new HttpError(409, 'invalid_transition');
 
@@ -668,7 +679,7 @@ export async function rideRoutes(app: FastifyInstance, { db, routes, cityCode, p
           if (!paused) await setPresenceStatus(tx, ride.driver_id, 'online');
         }
       });
-      await chargeCancelFee(request.params.id);
+      if (!repeatedCancel) await chargeCancelFee(request.params.id);
       return rideView(db, request.params.id, role);
     },
   );
