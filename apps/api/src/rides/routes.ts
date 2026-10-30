@@ -13,7 +13,7 @@ import type { FastifyInstance } from 'fastify';
 import type pg from 'pg';
 import { canTransition, clampToCorridor, scaledFareTiyin, type RideStatus } from '@taxi/shared';
 import { requireUser } from '../auth/session.ts';
-import type { RouteProvider } from '../routing/index.ts';
+import { lineJson, type RouteProvider } from '../routing/index.ts';
 import type { PaymentService } from '../payments/service.ts';
 import { uuidParams } from '../lib/geo.ts';
 import { cancelTerms, ARRIVAL_RADIUS_M, waitingOf } from './cancellation.ts';
@@ -185,13 +185,14 @@ export async function rideRoutes(app: FastifyInstance, { db, routes, cityCode, p
           const { rows } = await tx.query<{ id: string }>(
             `INSERT INTO rides (city_id, passenger_id, class_id, route_distance_m, route_duration_s, options,
                                 driver_comment, dispatch_mode, max_price_tiyin, search_deadline, payment_method, card_id,
-                                price_coefficient, priority, idempotency_key)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, now() + make_interval(secs => $10), $11, $12, $13, $14, $15) RETURNING id`,
+                                price_coefficient, priority, idempotency_key, route_line)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, now() + make_interval(secs => $10), $11, $12, $13, $14, $15,
+                     ST_SetSRID(ST_GeomFromGeoJSON($16::text), 4326)) RETURNING id`,
             [
               c.city_id, userId, c.id, route.distanceM, route.durationS,
               JSON.stringify(request.body.options ?? {}), request.body.comment ?? null,
               mode, mode === 'auto' ? request.body.maxPriceTiyin : null, SEARCH_WINDOW_SEC,
-              paymentMethod, cardId, c.coefficient, priority, idemKey,
+              paymentMethod, cardId, c.coefficient, priority, idemKey, lineJson(route.line),
             ],
           );
           const id = rows[0]!.id;
@@ -268,6 +269,23 @@ export async function rideRoutes(app: FastifyInstance, { db, routes, cityCode, p
     async (request) => {
       const { role } = await rideFor(db, request.params.id, request.user!.id, false);
       return rideView(db, request.params.id, role);
+    },
+  );
+
+  // The road route for drawing, fetched once per ride (and again after a route change) instead of
+  // riding along with every 2.5 s status poll. Null when routing gave no geometry.
+  app.get<{ Params: { id: string } }>(
+    '/rides/:id/route',
+    { preHandler: requireUser, schema: { params: uuidParams } },
+    async (request) => {
+      await rideFor(db, request.params.id, request.user!.id, false);
+      const { rows } = await db.query<{ line: { coordinates: [number, number][] } | null; version: number }>(
+        `SELECT ST_AsGeoJSON(route_line, 6)::json AS line,
+                (SELECT count(*)::int FROM price_changes pc WHERE pc.ride_id = r.id AND pc.new_stops IS NOT NULL) AS version
+           FROM rides r WHERE r.id = $1`,
+        [request.params.id],
+      );
+      return { line: rows[0]?.line?.coordinates ?? null, version: rows[0]?.version ?? 0 };
     },
   );
 

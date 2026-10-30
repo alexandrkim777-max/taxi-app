@@ -15,7 +15,11 @@ export interface QuoteClass {
 }
 export type Priority = 'cheap' | 'fast';
 export interface QuoteOption { priority: Priority; priceTiyin: number; pickupMin: number }
-export interface Quote { route: { distanceM: number; durationS: number }; classes: QuoteClass[] }
+/** The road route: [lng, lat] pairs as routing returns them; absent when routing has no geometry. */
+export type RouteLine = [number, number][];
+export const lineToPoints = (line: RouteLine): LatLng[] => line.map(([lng, lat]) => ({ lat, lng }));
+
+export interface Quote { route: { distanceM: number; durationS: number; line?: RouteLine }; classes: QuoteClass[] }
 
 export interface Card { id: string; provider: string; panMasked: string; expiry: string; isDefault: boolean }
 

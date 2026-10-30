@@ -14,7 +14,7 @@ import { MapButton } from './Menu';
 import type { MapPin } from '../map/types';
 import { useRide } from '../ride';
 import { space, useTheme } from '../theme';
-import type { CancelTerms, Ride, Stop } from '../types';
+import { lineToPoints, type CancelTerms, type LatLng, type Ride, type RouteLine, type Stop } from '../types';
 import { Button, Card, Chip, Divider, ErrorNote, Pill, Plate, Progress, Row, Sheet, T } from '../components/ui';
 
 function useNow(ms = 1000): number {
@@ -45,6 +45,18 @@ export function RideScreen({ ride, onMenu }: { ride: Ride; onMenu?: () => void }
 
   const pickup = ride.stops[0]!;
   const car = ride.driver?.location ?? null;
+
+  // The road route, fetched once per ride and again when the stops change (not on every poll).
+  const stopsKey = ride.stops.map((s) => `${s.lat.toFixed(5)},${s.lng.toFixed(5)}`).join('|');
+  const [roadLine, setRoadLine] = useState<LatLng[] | null>(null);
+  useEffect(() => {
+    let live = true;
+    setRoadLine(null);
+    api<{ line: RouteLine | null }>(`/rides/${ride.id}/route`)
+      .then((r) => { if (live && r.line) setRoadLine(lineToPoints(r.line)); })
+      .catch(() => { /* straight lines between the stops instead */ });
+    return () => { live = false; };
+  }, [ride.id, stopsKey]);
 
   async function act(key: string, fn: () => Promise<Ride | null | void>) {
     setBusy(key); setError(null);
@@ -87,7 +99,7 @@ export function RideScreen({ ride, onMenu }: { ride: Ride; onMenu?: () => void }
     ...(car ? [{ id: 'car', kind: 'car', lat: car.lat, lng: car.lng, heading: car.heading } as MapPin] : []),
   ];
   const enRoute = ride.status === 'accepted' || ride.status === 'driver_en_route';
-  const line = enRoute && car ? [car, pickup] : ride.stops;
+  const line = enRoute && car ? [car, pickup] : (roadLine ?? ride.stops);
   const etaMin = enRoute && car ? Math.max(1, Math.round(distanceM(car, pickup) / 1000 / 25 * 60) + 1) : null;
 
   let body: ReactNode;

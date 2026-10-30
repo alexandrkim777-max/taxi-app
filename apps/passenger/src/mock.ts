@@ -357,6 +357,8 @@ export async function mockApi(method: string, rawPath: string, body: any): Promi
     state.rides.set(id, r); state.activeId = id;
     return ok(rideView(r), 201);
   }
+  // The demo has no road data: no line, so the map draws straight segments between the stops.
+  if (method === 'GET' && /^\/rides\/[^/]+\/route$/.test(path)) return ok({ line: null, version: 0 });
   if (method === 'GET' && path === '/rides/active') {
     const r = state.activeId ? state.rides.get(state.activeId) : null;
     if (!r) return ok(null, 204);

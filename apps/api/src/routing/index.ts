@@ -9,6 +9,29 @@ export interface LatLng {
 export interface RouteResult {
   distanceM: number;
   durationS: number;
+  /** The way along the roads as [lng, lat] pairs (simplified, for drawing), when routing gives one. */
+  line?: [number, number][];
+}
+
+/** GeoJSON LineString text for PostGIS, or null (no geometry: the apps draw straight lines). */
+export function lineJson(line: [number, number][] | undefined): string | null {
+  return line && line.length >= 2 ? JSON.stringify({ type: 'LineString', coordinates: line }) : null;
+}
+
+/** A drawable line: at most this many points (OSRM's simplified overview is far below it). */
+const MAX_LINE_POINTS = 2000;
+
+function validLine(raw: unknown): [number, number][] | undefined {
+  if (!Array.isArray(raw) || raw.length < 2 || raw.length > MAX_LINE_POINTS) return undefined;
+  const out: [number, number][] = [];
+  for (const p of raw) {
+    if (!Array.isArray(p) || p.length < 2) return undefined;
+    const [lng, lat] = p as unknown[];
+    if (typeof lng !== 'number' || typeof lat !== 'number' || !Number.isFinite(lng) || !Number.isFinite(lat)
+      || Math.abs(lat) > 90 || Math.abs(lng) > 180) return undefined;
+    out.push([Math.round(lng * 1e6) / 1e6, Math.round(lat * 1e6) / 1e6]);
+  }
+  return out;
 }
 
 export interface RouteProvider {
@@ -38,7 +61,8 @@ export class EstimateRouteProvider implements RouteProvider {
     for (let i = 1; i < points.length; i++) straight += haversineM(points[i - 1], points[i]);
     const distanceM = Math.round(straight * 1.35);
     const durationS = Math.round(distanceM / (22_000 / 3600)); // ~22 km/h in city traffic
-    return { distanceM, durationS };
+    // No road data here: the "route" is the straight line through the stops.
+    return { distanceM, durationS, line: points.map((p) => [p.lng, p.lat] as [number, number]) };
   }
 
   async durationsTo(from: LatLng[], to: LatLng): Promise<number[]> {
@@ -55,16 +79,20 @@ export class OsrmRouteProvider implements RouteProvider {
 
   async route(points: LatLng[]): Promise<RouteResult> {
     const coords = points.map((p) => `${p.lng.toFixed(6)},${p.lat.toFixed(6)}`).join(';');
-    const res = await fetch(`${this.baseUrl}/route/v1/driving/${coords}?overview=false`, {
+    const res = await fetch(`${this.baseUrl}/route/v1/driving/${coords}?overview=simplified&geometries=geojson`, {
       signal: AbortSignal.timeout(3000),
     });
     if (!res.ok) throw new Error(`OSRM responded ${res.status}`);
-    const body = (await res.json()) as { code?: string; routes?: { distance: number; duration: number }[] };
+    const body = (await res.json()) as {
+      code?: string; routes?: { distance: number; duration: number; geometry?: { coordinates?: unknown } }[];
+    };
     const best = body.routes?.[0];
     if (body.code !== 'Ok' || !best || !Number.isFinite(best.distance) || !Number.isFinite(best.duration)) {
       throw new Error('OSRM returned no route');
     }
-    return { distanceM: Math.round(best.distance), durationS: Math.round(best.duration) };
+    // A broken geometry never breaks pricing: the apps fall back to straight lines.
+    const line = validLine(best.geometry?.coordinates);
+    return { distanceM: Math.round(best.distance), durationS: Math.round(best.duration), ...(line ? { line } : {}) };
   }
 
   /** OSRM table service: many drivers to one pickup in a single request. */

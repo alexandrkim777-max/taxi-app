@@ -6,7 +6,7 @@ export interface MapPin extends LatLng { id: string; kind: PinKind; label?: stri
 
 export interface MapProps {
   pins: MapPin[];
-  /** Drawn as the route line (straight segments between stops until routing geometry is added). */
+  /** Drawn as the route line: the road route from the server, or straight segments between stops without one. */
   line?: LatLng[];
   /** Space taken by the bottom sheet, so pins are never hidden under it. */
   bottomInset?: number;

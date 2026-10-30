@@ -12,7 +12,7 @@ import { Map } from '../map/Map';
 import type { MapPin } from '../map/types';
 import { useRide } from '../ride';
 import { radius, space, useTheme } from '../theme';
-import type { Card, Entrance, Priority, Quote, QuoteClass, Ride, Stop } from '../types';
+import { lineToPoints, type Card, type Entrance, type Priority, type Quote, type QuoteClass, type Ride, type Stop } from '../types';
 import { Button, Card as Box, Chip, Divider, ErrorNote, Field, Header, Pill, Row, T } from '../components/ui';
 
 const OPTIONS = ['childSeat', 'pet', 'quiet', 'luggage'] as const;
@@ -113,7 +113,7 @@ export function OrderScreen() {
     <SafeAreaView style={{ flex: 1, backgroundColor: c.surfacePage }} edges={['top', 'left', 'right', 'bottom']}>
       <View style={{ paddingHorizontal: space.s5, paddingTop: space.s2 }}><Header title={t.orderAt} onBack={pop} /></View>
       <View style={{ height: 180, marginHorizontal: space.s5, borderRadius: radius.lg, overflow: 'hidden' }}>
-        <Map pins={pins} line={points} onPinPress={(p) => {
+        <Map pins={pins} line={quote?.route.line ? lineToPoints(quote.route.line) : points} onPinPress={(p) => {
           if (p.kind !== 'entrance') return;
           const e = entrances.find((x) => `e${x.id}` === p.id);
           if (e) { setTyping(false); setPickup({ entranceId: e.id, entranceLabel: undefined }); }

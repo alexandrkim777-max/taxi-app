@@ -10,7 +10,7 @@ import type { FastifyInstance } from 'fastify';
 import type pg from 'pg';
 import { driverPriceTiyin, type RideStatus } from '@taxi/shared';
 import { requireUser } from '../auth/session.ts';
-import type { RouteProvider, RouteResult } from '../routing/index.ts';
+import { lineJson, type RouteProvider, type RouteResult } from '../routing/index.ts';
 import { haversineM, uuidParams } from '../lib/geo.ts';
 import { HttpError, withTx } from '../lib/tx.ts';
 import { logEvent } from '../dispatch/matching.ts';
@@ -168,8 +168,9 @@ export async function routeChangeRoutes(app: FastifyInstance, { db, routes }: De
           ],
         );
         await tx.query(
-          `UPDATE rides SET locked_price_tiyin = $2, route_distance_m = $3, route_duration_s = $4 WHERE id = $1`,
-          [rideId, c.newPriceTiyin, c.route.distanceM, c.route.durationS],
+          `UPDATE rides SET locked_price_tiyin = $2, route_distance_m = $3, route_duration_s = $4,
+                            route_line = ST_SetSRID(ST_GeomFromGeoJSON($5::text), 4326) WHERE id = $1`,
+          [rideId, c.newPriceTiyin, c.route.distanceM, c.route.durationS, lineJson(c.route.line)],
         );
         await tx.query(`DELETE FROM ride_stops WHERE ride_id = $1`, [rideId]);
         await insertStops(tx, rideId, request.body.stops);
