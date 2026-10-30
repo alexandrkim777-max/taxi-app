@@ -28,7 +28,7 @@ const uz = {
   subscriptionTitle: 'Obuna', subscriptionHint: 'Komissiya yoʻq: har bir safar pulining 100% sizda qoladi.', pay: 'Toʻlash', activeUntil: 'Amal qiladi',
   profile: 'Profil', language: 'Til', theme: 'Mavzu', themeAuto: 'Avto', themeDay: 'Kunduzgi', themeNight: 'Tungi', logout: 'Chiqish',
   tabLine: 'Liniya', tabPrice: 'Narx', tabSubscription: 'Obuna', tabProfile: 'Profil',
-  error: 'Xatolik', retry: 'Qayta urinish', locationNeeded: 'Joylashuvga ruxsat bering, aks holda yoʻlovchilar sizni koʻrmaydi.',
+  error: 'Xatolik', retry: 'Qayta urinish', locationNeeded: 'Joylashuvga ruxsat bering, aks holda yoʻlovchilar sizni koʻrmaydi.', signalLost: 'GPS yoki internet yoʻq — buyurtmalar kelmaydi.',
   demo: 'Demo', sum: 'soʻm', min: 'daq', km: 'km', seconds: 'son',
   docs: { passport: 'Pasport', license: 'Haydovchilik guvohnomasi', vehicle_registration: 'Texpasport', selfie: 'Selfi', self_employed: 'Oʻzini oʻzi band qilish' },
 };
@@ -60,7 +60,7 @@ const ru: Dict = {
   subscriptionTitle: 'Подписка', subscriptionHint: 'Без комиссии: 100% денег за каждую поездку остаются вам.', pay: 'Оплатить', activeUntil: 'Действует до',
   profile: 'Профиль', language: 'Язык', theme: 'Тема', themeAuto: 'Авто', themeDay: 'Дневная', themeNight: 'Ночная', logout: 'Выйти',
   tabLine: 'Линия', tabPrice: 'Цена', tabSubscription: 'Подписка', tabProfile: 'Профиль',
-  error: 'Ошибка', retry: 'Повторить', locationNeeded: 'Разрешите доступ к геолокации, иначе пассажиры вас не увидят.',
+  error: 'Ошибка', retry: 'Повторить', locationNeeded: 'Разрешите доступ к геолокации, иначе пассажиры вас не увидят.', signalLost: 'Нет GPS или интернета — заказы не приходят.',
   demo: 'Демо', sum: 'сум', min: 'мин', km: 'км', seconds: 'сек',
   docs: { passport: 'Паспорт', license: 'Водительские права', vehicle_registration: 'Техпаспорт', selfie: 'Селфи', self_employed: 'Самозанятость' },
 };
@@ -91,7 +91,7 @@ const en: Dict = {
   subscriptionTitle: 'Subscription', subscriptionHint: 'No commission: you keep 100% of every fare.', pay: 'Pay', activeUntil: 'Active until',
   profile: 'Profile', language: 'Language', theme: 'Theme', themeAuto: 'Auto', themeDay: 'Day', themeNight: 'Night', logout: 'Sign out',
   tabLine: 'Line', tabPrice: 'Price', tabSubscription: 'Plan', tabProfile: 'Profile',
-  error: 'Error', retry: 'Retry', locationNeeded: 'Allow location access, otherwise passengers cannot see you.',
+  error: 'Error', retry: 'Retry', locationNeeded: 'Allow location access, otherwise passengers cannot see you.', signalLost: 'No GPS or internet: orders will not come in.',
   demo: 'Demo', sum: 'sum', min: 'min', km: 'km', seconds: 'sec',
   docs: { passport: 'Passport', license: 'Driving licence', vehicle_registration: 'Vehicle registration', selfie: 'Selfie', self_employed: 'Self-employed status' },
 };

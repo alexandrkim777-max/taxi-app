@@ -7,6 +7,8 @@ type Q = pg.Pool | pg.PoolClient;
 
 /** A position older than this is treated as offline (app closed, no signal). */
 export const PRESENCE_TTL_SEC = 60;
+/** A free driver silent for this long is taken off the line (the app tries to come back by itself). */
+export const PRESENCE_SWEEP_MIN = 10;
 /** Drivers are never sent further than this to a pickup, whatever their own setting. */
 export const MAX_PICKUP_RADIUS_M = 5000;
 
@@ -191,4 +193,17 @@ export async function pauseIfCancellingTooOften(q: Q, driverId: string): Promise
   await q.query(`UPDATE drivers SET paused_until = now() + make_interval(mins => $2) WHERE id = $1`, [driverId, CANCEL_PAUSE_MIN]);
   await q.query(`DELETE FROM driver_presence WHERE driver_id = $1`, [driverId]);
   return true;
+}
+
+/**
+ * Removes free drivers whose last position is older than PRESENCE_SWEEP_MIN (app killed, phone
+ * off). They were already invisible to dispatch after PRESENCE_TTL_SEC; this keeps the table and
+ * the admin counters honest. Drivers on a ride ('busy') are never swept.
+ */
+export async function sweepStalePresence(q: Q): Promise<number> {
+  const { rowCount } = await q.query(
+    `DELETE FROM driver_presence WHERE status = 'online' AND updated_at < now() - make_interval(mins => $1)`,
+    [PRESENCE_SWEEP_MIN],
+  );
+  return rowCount ?? 0;
 }

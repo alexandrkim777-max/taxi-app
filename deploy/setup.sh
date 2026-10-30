@@ -66,14 +66,16 @@ docker run --rm -v "$PWD/data/osrm:/data" $OSRM osrm-customize /data/uzbekistan-
 echo "== Start"
 docker compose up -d --build
 
-echo "== Daily database backup (kept 14 days)"
-mkdir -p /var/backups/taxi
+echo "== Backups: daily (database + uploaded files, kept 14 days), weekly restore drill"
 cat > /etc/cron.daily/taxi-backup <<CRON
 #!/bin/sh
-cd $(pwd) && docker compose exec -T db pg_dump -U taxi -Fc taxi > /var/backups/taxi/taxi-\$(date +%F).dump
-find /var/backups/taxi -name '*.dump' -mtime +14 -delete
+$(pwd)/backup.sh >> /var/log/taxi-backup.log 2>&1
 CRON
-chmod 700 /etc/cron.daily/taxi-backup
+cat > /etc/cron.weekly/taxi-restore-check <<CRON
+#!/bin/sh
+$(pwd)/restore-check.sh >> /var/log/taxi-backup.log 2>&1
+CRON
+chmod 700 /etc/cron.daily/taxi-backup /etc/cron.weekly/taxi-restore-check
 
 echo
 echo "Done. API: https://$DOMAIN   Staff panel: https://$DOMAIN/admin/"

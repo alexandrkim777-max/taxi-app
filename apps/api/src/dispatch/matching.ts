@@ -307,6 +307,7 @@ export async function dispatchTick(db: pg.Pool): Promise<number> {
       ORDER BY created_at LIMIT 200`,
   );
   let handled = 0;
+  let firstError: unknown = null;
   // One short transaction per ride, so one failure does not hold back the others.
   for (const { id } of rows) {
     const client = await db.connect();
@@ -331,11 +332,13 @@ export async function dispatchTick(db: pg.Pool): Promise<number> {
       await client.query('COMMIT');
       if (ride) handled++;
     } catch (err) {
-      await client.query('ROLLBACK');
-      throw err;
+      await client.query('ROLLBACK').catch(() => {});
+      // Keep going: a single broken ride must not stall dispatch for everyone. Reported below.
+      firstError ??= Object.assign(err instanceof Error ? err : new Error(String(err)), { rideId: id });
     } finally {
       client.release();
     }
   }
+  if (firstError) throw firstError;
   return handled;
 }

@@ -8,7 +8,8 @@ import { createPaymentProviders } from './payments/providers/index.ts';
 import { PaymentService } from './payments/service.ts';
 import { FakeFiscalProvider } from './payments/fiscal.ts';
 import { DEV_TOKEN_KEY } from './payments/crypto.ts';
-import { prepayTick } from './payments/prepay.ts';
+import { prepayTick, reconcileTick } from './payments/prepay.ts';
+import { sweepStalePresence } from './dispatch/presence.ts';
 import { FileService, LocalFileStorage } from './files/index.ts';
 import { createGeoProvider } from './geo/provider.ts';
 import { createPushSender } from './push/sender.ts';
@@ -48,12 +49,24 @@ const push = createPushSender(config.pushProvider, config.expoAccessToken, (m) =
 // Background loop every 2 s (push notifications: every 1 s, so a new order rings at once): dispatcher (next driver after a timeout, new drivers, giving up after
 // the search window) and card prepayment at 60% of the trip. Overlapping runs are skipped; several instances are safe.
 const DISPATCH_TICK_MS = 2000;
+// Every 30th tick (about once a minute): sweep silent drivers off the line and charge card rides a
+// crash left unpaid. Each job reports its own failure, so one broken job never stops the others.
+const SLOW_EVERY = 30;
 let ticking = false;
+let tickNo = 0;
 const ticker = setInterval(() => {
   if (ticking) return;
   ticking = true;
-  Promise.all([dispatchTick(pool), prepayTick(pool, payments)])
-    .catch((err) => app.log.error(err, 'background tick failed'))
+  const slow = tickNo++ % SLOW_EVERY === 0;
+  const jobs: [string, Promise<unknown>][] = [
+    ['dispatch', dispatchTick(pool)],
+    ['prepay', prepayTick(pool, payments)],
+    ...(slow ? [['presence sweep', sweepStalePresence(pool)], ['reconcile', reconcileTick(pool, payments)]] as [string, Promise<unknown>][] : []),
+  ];
+  Promise.allSettled(jobs.map(([, p]) => p))
+    .then((results) => results.forEach((r, i) => {
+      if (r.status === 'rejected') app.log.error({ err: r.reason, job: jobs.at(i)?.[0] }, 'background job failed');
+    }))
     .finally(() => { ticking = false; });
 }, DISPATCH_TICK_MS);
 let pushing = false;
@@ -65,6 +78,23 @@ const pushTicker = setInterval(() => {
     .finally(() => { pushing = false; });
 }, 1000);
 app.addHook('onClose', async () => { clearInterval(ticker); clearInterval(pushTicker); });
+
+// Graceful stop (docker stop / redeploy sends SIGTERM): stop the loops, finish requests in flight,
+// close the pool. Everything lives in the database, so the next start simply carries on.
+let stopping = false;
+for (const signal of ['SIGTERM', 'SIGINT'] as const) {
+  process.once(signal, () => {
+    if (stopping) return;
+    stopping = true;
+    app.log.info({ signal }, 'shutting down');
+    const force = setTimeout(() => process.exit(1), 10_000);
+    force.unref();
+    app.close()
+      .then(() => pool.end())
+      .then(() => process.exit(0))
+      .catch((err) => { app.log.error(err, 'shutdown failed'); process.exit(1); });
+  });
+}
 
 try {
   await app.listen({ port: config.port, host: '0.0.0.0' });

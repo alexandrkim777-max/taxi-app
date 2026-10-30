@@ -18,6 +18,8 @@ services:
   api:
     build: { context: .., dockerfile: deploy/Dockerfile }
     restart: unless-stopped
+    # SIGTERM first: the API finishes requests in flight and closes the pool (10 s), then is killed.
+    stop_grace_period: 15s
     env_file: .env
     environment:
       DATABASE_URL: postgres://taxi:${POSTGRES_PASSWORD}@db:5432/taxi

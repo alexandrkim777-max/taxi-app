@@ -6,7 +6,7 @@ import { Platform } from 'react-native';
 import * as Haptics from 'expo-haptics';
 import { activateKeepAwakeAsync, deactivateKeepAwake } from 'expo-keep-awake';
 import { api, ApiError, errorText } from './api';
-import { currentPosition, requestPermission, startTracking, stopTracking } from './location';
+import { currentPosition, lastPingOkAt, onNotOnline, requestPermission, startTracking, stopTracking } from './location';
 import { useApp } from './context';
 
 export interface Stop { position: number; lat: number; lng: number; address: string | null; entrance?: string | null }
@@ -28,6 +28,8 @@ export interface Ride {
 
 interface LineCtx {
   online: boolean;
+  /** On the line, but the server has not had a position for a while: no orders will come. */
+  signalLost: boolean;
   busy: boolean;
   notice: string | null;
   request: Request | null;
@@ -42,6 +44,9 @@ interface LineCtx {
   refreshRide: () => Promise<void>;
   doneRating: () => void;
 }
+
+/** Warn after this long without an accepted ping (the server's own cut-off is 60 s). */
+const SIGNAL_LOST_MS = 45_000;
 
 const Ctx = createContext<LineCtx | null>(null);
 export function useLine(): LineCtx {
@@ -61,6 +66,7 @@ export function LineProvider({ children }: { children: ReactNode }) {
   const [ride, setRide] = useState<Ride | null>(null);
   const [finished, setFinished] = useState<Ride | null>(null);
   const lastRequest = useRef<string | null>(null);
+  const [signalLost, setSignalLost] = useState(false);
 
   const explain = useCallback((err: unknown) => {
     if (err instanceof ApiError) {
@@ -78,6 +84,30 @@ export function LineProvider({ children }: { children: ReactNode }) {
     }).catch(() => {});
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // The server dropped us from the line (paused, blocked, or swept after a long silence).
+  // Try to come back once; if that is refused, show why and stop tracking.
+  const recovering = useRef(false);
+  useEffect(() => {
+    if (!online) { onNotOnline(null); return; }
+    onNotOnline(() => {
+      if (recovering.current) return;
+      recovering.current = true;
+      currentPosition()
+        .then((pos) => api('/drivers/me/online', { body: pos }))
+        .catch(async (err) => { await stopTracking().catch(() => {}); setOnline(false); setNotice(explain(err)); })
+        .finally(() => { recovering.current = false; });
+    });
+    return () => onNotOnline(null);
+  }, [online, explain]);
+
+  // Warn when pings stop getting through (no GPS fix or no internet): the server stops
+  // offering orders 60 s after the last position, so the driver should know at once.
+  useEffect(() => {
+    if (!online) { setSignalLost(false); return; }
+    const id = setInterval(() => setSignalLost(Date.now() - lastPingOkAt() > SIGNAL_LOST_MS), 5000);
+    return () => clearInterval(id);
+  }, [online]);
 
   // Keep the screen on while on the line (navigation, incoming orders).
   const awake = useRef(false);
@@ -128,7 +158,7 @@ export function LineProvider({ children }: { children: ReactNode }) {
   }, [ride, refreshRide]);
 
   const value: LineCtx = {
-    online, busy, notice, request, ride, finished,
+    online, signalLost, busy, notice, request, ride, finished,
     goOnline: async () => {
       setBusy(true); setNotice(null);
       try {

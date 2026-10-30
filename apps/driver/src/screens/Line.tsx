@@ -69,7 +69,8 @@ export function HomeScreen({ onSubscription }: { onSubscription: () => void }) {
           </Card>
         </Pressable>
 
-        {line.online && !line.request && <T muted center>{t.waitingOrders}</T>}
+        {line.online && line.signalLost && <Card tone="warm"><T v="bodyStrong" color={c.warmInk}>{t.signalLost}</T></Card>}
+        {line.online && !line.request && !line.signalLost && <T muted center>{t.waitingOrders}</T>}
         <ErrorNote text={line.notice} />
       </Screen>
       {line.request && <RequestSheet r={line.request} />}
@@ -223,6 +224,7 @@ export function RideScreen({ ride }: { ride: Ride }) {
           <Button kind="secondary" compact title={t.cancelRide} disabled={reason.trim().length < 3} onPress={() => line.cancel({ reason: reason.trim() })} />
         </Card>
       )}
+      {line.signalLost && <Card tone="warm"><T v="bodyStrong" color={c.warmInk}>{t.signalLost}</T></Card>}
       <ErrorNote text={line.notice} />
     </Screen>
   );
