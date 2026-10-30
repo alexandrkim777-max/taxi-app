@@ -87,11 +87,12 @@ export async function staffLogin(s: Setup, role: 'admin' | 'support' = 'admin', 
   assert.equal(first.statusCode, 200, first.body);
   const { ticket, secret } = first.json();
   assert.ok(secret, 'first sign-in sets up the authenticator');
-  const second = await s.app.inject({ method: 'POST', url: '/staff/auth/totp', payload: { ticket, code: totpAt(secret, currentStep()) } });
+  const step = currentStep();
+  const second = await s.app.inject({ method: 'POST', url: '/staff/auth/totp', payload: { ticket, code: totpAt(secret, step) } });
   assert.equal(second.statusCode, 200, second.body);
   const token = String(second.headers['set-cookie']).match(new RegExp(`${STAFF_COOKIE}=([^;]+)`))![1];
   const headers: Record<string, string> = { cookie: `${STAFF_COOKIE}=${token}`, [CSRF_HEADER]: CSRF_VALUE };
-  return { headers, userId: rows[0]!.id, phone, secret: secret as string };
+  return { headers, userId: rows[0]!.id, phone, secret: secret as string, step };
 }
 
 /** A verified economy driver with documents, a vehicle and the free trial. Returns auth headers. */

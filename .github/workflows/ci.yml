@@ -6,6 +6,7 @@ on:
   push:
     branches: [main]
   pull_request:
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -42,7 +43,15 @@ jobs:
       - run: npm ci
       - run: npm run db:migrate
       - run: npm run typecheck
-      - run: npm test
+      - name: Tests (failures are also posted as annotations, readable without the log)
+        run: |
+          set -o pipefail
+          npm test 2>&1 | tee test.log || {
+            grep -E 'not ok|# Subtest|error:|expected:|actual:|\.test\.ts:[0-9]+' test.log | grep -B1 -A12 'not ok' | head -80 \
+              | sed 's/%/%25/g' | awk '{ printf "%s%%0A", $0 }' | sed 's/^/::error title=Failed tests::/'
+            echo
+            exit 1
+          }
       - name: The server starts and answers (catches what unit tests do not load)
         run: |
           PORT=3999 PUSH_PROVIDER=log node --experimental-strip-types --no-warnings apps/api/src/server.ts > server.log 2>&1 &

@@ -69,7 +69,7 @@ test('only staff get past the SMS step; a code works once; five wrong codes burn
   assert.equal((await smsStep(s, outsider)).statusCode, 403);
 
   const admin = await staffLogin(s, 'support');
-  const step = currentStep();
+  const step = admin.step; // the step whose code was just used (not "now": a 30 s boundary may have passed)
   // Signed in with the code of the current step: that code cannot sign in again.
   const replay = await smsStep(s, admin.phone);
   assert.equal(replay.json().next, 'totp');
