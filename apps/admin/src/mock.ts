@@ -171,6 +171,14 @@ function recomputeCoefficients() {
   }
 }
 
+/** Demo card payments per ride, kept so a refund made in the demo shows up on the next visit. */
+const demoPayments: Record<string, any[]> = {};
+function ridePayments(r: Record<string, any>): any[] {
+  demoPayments[r.id] ??= [{ id: id(), ride_id: r.id, type: 'ride', status: 'succeeded', amount_tiyin: r.locked_price_tiyin, provider: 'payme',
+    failure_reason: null, paid_at: ago(150), created_at: ago(150), refundable_tiyin: r.locked_price_tiyin }];
+  return demoPayments[r.id]!;
+}
+
 export async function mockApi(method: string, fullPath: string, body: any): Promise<Res> {
   await new Promise((r) => setTimeout(r, 120));
   const [path, qs] = fullPath.split('?');
@@ -311,14 +319,26 @@ export async function mockApi(method: string, fullPath: string, body: any): Prom
       .map((r) => ({ id: r.id, status: r.status, priceTiyin: r.locked_price_tiyin || null, paymentMethod: r.payment_method, createdAt: r.created_at,
         passengerName: r.passenger_name, driverName: r.driver_name, plate: r.plate })));
   }
+  if ((m = is('POST', '/admin/payments/:/refund'))) {
+    const p = Object.values(demoPayments).flat().find((x) => x.id === m![0]);
+    if (!p) return err(404, 'not_found');
+    if (!(body.amountTiyin >= 100 && body.amountTiyin <= p.refundable_tiyin)) return err(409, 'refund_exceeds_payment');
+    p.refundable_tiyin -= body.amountTiyin;
+    const list = demoPayments[p.ride_id]!;
+    list.push({ id: id(), ride_id: p.ride_id, type: 'refund', status: 'succeeded', amount_tiyin: body.amountTiyin, provider: p.provider,
+      failure_reason: null, paid_at: ago(0), created_at: ago(0), refund_of: p.id, refund_kind: 'moderator', refund_reason: body.reason,
+      approved_by_name: me.name, refundable_tiyin: null });
+    log('refund_sent', 'payment', p.id, body);
+    return ok({ refundId: list.at(-1)!.id, status: 'succeeded' });
+  }
+
   if ((m = is('GET', '/admin/rides/:'))) {
     const r = rides.find((x) => x.id === m![0]); if (!r) return err(404, 'not_found');
     log('ride_viewed', 'ride', r.id);
     return ok({ ride: r, stops: [
       { position: 0, lat: 41.2995, lng: 69.2401, address: 'Amir Temur shoh koʻchasi, 107' },
       { position: 1, lat: 41.3381, lng: 69.3346, address: 'Mega Planet, Yunusobod' },
-    ], events: events(r), priceChanges: [], payments: r.payment_method === 'card'
-      ? [{ id: id(), type: 'ride', status: 'succeeded', amount_tiyin: r.locked_price_tiyin, provider: 'payme', failure_reason: null, paid_at: ago(150), created_at: ago(150) }] : [],
+    ], events: events(r), priceChanges: [], payments: r.payment_method === 'card' ? ridePayments(r) : [],
     ratings: r.status === 'completed' ? [{ score: 5, tags: ['careful_driving', 'clean_car'], reason: null }] : [],
     complaints: complaints.filter((c) => c.ride_id === r.id).map((c) => ({ id: c.id, type: c.type, severity: c.severity, status: c.status })),
     dispute: null });

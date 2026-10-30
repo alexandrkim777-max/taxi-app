@@ -208,7 +208,7 @@ The API refuses to start in production if:
 ## Still to do before launch
 
 - Real SMS provider adapter and its webhook signature checks.
-- Payme / Click / Uzum adapters (webhook auth, checkout, card tokens), fiscal operator, driver payouts, refunds.
+- Payme / Click / Uzum adapters (webhook auth, checkout, card tokens, refunds), fiscal operator, driver payouts.
 - Move file storage to S3-compatible storage in Uzbekistan with encryption at rest; strip photo metadata (EXIF/GPS).
 - Hosting in Uzbekistan, TLS, database backups and encryption at rest.
 - Staff panel only from allowed networks / VPN.

@@ -38,6 +38,18 @@ export type ChargeResult =
   | { status: 'pending'; providerRef: string }
   | { status: 'failed'; reason: string; providerRef?: string };
 
+export interface RefundRequest {
+  /** Our refund payment id (the provider echoes it in webhooks). */
+  refundId: string;
+  /** The payment the money is returned from, and the provider's reference for it. */
+  originalPaymentId: string;
+  originalProviderRef: string;
+  amountTiyin: number;
+  reason: string;
+}
+
+export type RefundResult = ChargeResult;
+
 /** What a webhook told us, normalised. */
 export interface WebhookOutcome {
   /** Exactly what to answer the provider (each has its own protocol). */
@@ -78,6 +90,12 @@ export interface PaymentProvider {
 
   /** Charges a saved card without the user present (ride fare, cancellation fee, debts). */
   chargeCard(req: ChargeRequest): Promise<ChargeResult>;
+
+  /**
+   * Returns money from one of our successful payments (whole or part) to the payer's card. The
+   * provider must refuse more than was paid; we check that too before calling.
+   */
+  refund(req: RefundRequest): Promise<RefundResult>;
 
   /** Removes the token on the provider's side when the user deletes the card. */
   removeCard(token: string): Promise<void>;

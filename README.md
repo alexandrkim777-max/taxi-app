@@ -201,7 +201,8 @@ Every action, including opening a dossier, is written to an append-only audit lo
 | POST | `/admin/pricing/coefficients/:id/end` | admin | End or cancel a coefficient rule |
 | PUT | `/admin/pricing/classes/:code` | admin | Recommended tariff, cancellation fee, waiting |
 | PUT | `/admin/pricing/plans/:code` | admin | Subscription price / availability |
-| GET | `/admin/finance?days=` | admin | Payments by type, debts, refunds to send |
+| GET | `/admin/finance?days=` | admin | Payments by type, debts, refunds in flight or failed |
+| POST | `/admin/payments/:id/refund` | admin | Gives money back from a card payment through its provider (amount, reason, `Idempotency-Key`); never more than was paid; audited |
 | GET | `/admin/audit` | admin | Who did what |
 | GET | `/rides/:id` | participants | Ride, stops, offers or assigned driver with live position |
 | GET | `/rides/active` | user | Current ride, to restore the app after a restart |
@@ -284,7 +285,11 @@ development uses the `fake` provider (test page at `/dev/payments/:id`; card tok
 - Cancellation fees: charged to the ride's card at once; on cash rides they become a debt.
 - Debts (declined card, unpaid fee) must be settled before the next order.
 - Fiscal receipts for subscriptions behind `payments/fiscal.ts` (stub until the OFD operator is connected).
-- Not yet: payouts of card money to drivers, refunds.
+- Refunds: staff refunds (admin, with reason; who approved is kept) and automatic ones when the final fare
+  came out lower than what was charged at 60%. Both go through the provider that took the money; the
+  original payment is never edited; never more than was paid, even with two admins clicking at once.
+- Not yet: payouts of card money to drivers (depends on the legal model), subscription refunds (need a
+  fiscal return receipt).
 
 ## Principles (see the product spec)
 

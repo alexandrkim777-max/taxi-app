@@ -228,6 +228,7 @@ export async function rideRoutes(app: FastifyInstance, { db, routes, cityCode, p
         `SELECT r.id, r.status, vc.code AS "classCode", r.locked_price_tiyin::int AS "priceTiyin",
                 r.payment_method AS "paymentMethod", r.created_at AS "createdAt",
                 r.cancel_fee_tiyin::int AS "cancelFeeTiyin", du.name AS "driverName",
+                r.refunded_tiyin::int AS "refundedTiyin",
                 v.make_model AS "makeModel", v.plate,
                 (SELECT address FROM ride_stops s WHERE s.ride_id = r.id ORDER BY position LIMIT 1) AS "fromAddress",
                 (SELECT json_build_object('address', address, 'lat', ST_Y(point::geometry), 'lng', ST_X(point::geometry))

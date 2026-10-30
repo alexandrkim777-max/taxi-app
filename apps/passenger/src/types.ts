@@ -60,6 +60,8 @@ export interface PastRide {
   id: string; status: 'completed' | 'cancelled'; classCode: string; priceTiyin: number | null; paymentMethod: 'cash' | 'card';
   createdAt: string; cancelFeeTiyin: number | null; driverName: string | null; makeModel: string | null; plate: string | null;
   fromAddress: string | null; to: (LatLng & { address: string | null }) | null; hasDispute: boolean;
+  /** Given back by staff (a dispute, a mistake), on top of the price above. */
+  refundedTiyin?: number;
 }
 
 export interface DisputeView {

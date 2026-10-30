@@ -87,6 +87,7 @@ export function RideDetailsScreen({ rideId }: { rideId: string }) {
           <T>{ride.fromAddress} → {ride.to?.address}</T>
           {ride.driverName && <T muted>{ride.driverName} · {ride.makeModel} · {plate(ride.plate)}</T>}
           <T v="caption" muted>{ride.paymentMethod === 'cash' ? t.cash : t.card}</T>
+          {ride.refundedTiyin ? <T v="bodyStrong" color={c.success}>{t.refunded}: {money(ride.refundedTiyin, lang)}</T> : null}
         </Card>
       )}
 

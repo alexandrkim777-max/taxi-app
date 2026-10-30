@@ -11,7 +11,7 @@
 //                       Auth: HTTP Basic "Paycom:<PAYME_KEY>", plus Payme's published IP list.
 //                       Amounts are in tiyin, same as ours.
 
-import type { CardInfo, ChargeRequest, ChargeResult, CheckoutRequest, CheckoutResult, PaymentLookup, PaymentProvider, WebhookOutcome, WebhookRequest } from '../types.ts';
+import type { CardInfo, ChargeRequest, ChargeResult, CheckoutRequest, CheckoutResult, PaymentLookup, PaymentProvider, WebhookOutcome, WebhookRequest, RefundRequest, RefundResult } from '../types.ts';
 import { ProviderNotConfigured } from '../types.ts';
 
 export interface PaymeConfig {
@@ -41,6 +41,11 @@ export class PaymeProvider implements PaymentProvider {
 
   async chargeCard(_req: ChargeRequest): Promise<ChargeResult> {
     throw new ProviderNotConfigured(this.name, 'chargeCard');
+  }
+
+  /** -> Merchant API `CancelTransaction` for card receipts (`receipts.cancel` in the Subscribe API) */
+  async refund(_req: RefundRequest): Promise<RefundResult> {
+    throw new ProviderNotConfigured(this.name, 'refund');
   }
 
   async removeCard(_token: string): Promise<void> {

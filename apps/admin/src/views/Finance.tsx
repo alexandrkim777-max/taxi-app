@@ -7,7 +7,7 @@ interface Fin {
   days: number;
   payments: { type: string; status: string; count: number; amountTiyin: number }[];
   debts: { unpaidRidesTiyin: number; unpaidCancelFeesTiyin: number };
-  refundsPending: { id: string; rideId: string; amountTiyin: number; createdAt: string }[];
+  refundsPending: { id: string; rideId: string; amountTiyin: number; createdAt: string; status: string; reason: string | null; failureReason: string | null }[];
 }
 
 export function Finance() {
@@ -47,7 +47,8 @@ export function Finance() {
           {data.refundsPending.length === 0 && <p className="muted">—</p>}
           {data.refundsPending.map((r) => (
             <button key={r.id} type="button" className="item" onClick={() => go(`ride-${r.rideId}`)}>
-              <span className="num">{dateTime(r.createdAt)}</span><b className="num">{sum(r.amountTiyin, lang)}</b>
+              <span className="num">{dateTime(r.createdAt)} <span className="muted">{r.failureReason ?? r.reason ?? ''}</span></span>
+              <span className="line"><b className="num">{sum(r.amountTiyin, lang)}</b><StatusPill status={r.status} /></span>
             </button>
           ))}
         </div>

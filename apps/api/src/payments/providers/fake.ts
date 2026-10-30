@@ -8,7 +8,7 @@
 import { createHmac, timingSafeEqual } from 'node:crypto';
 import type {
   CardInfo, ChargeRequest, ChargeResult, CheckoutRequest, CheckoutResult, PaymentLookup, PaymentProvider,
-  WebhookOutcome, WebhookRequest,
+  RefundRequest, RefundResult, WebhookOutcome, WebhookRequest,
 } from '../types.ts';
 
 export class FakeProvider implements PaymentProvider {
@@ -36,6 +36,10 @@ export class FakeProvider implements PaymentProvider {
       return { status: 'failed', reason: 'insufficient_funds', providerRef: `fake_${req.paymentId}` };
     }
     return { status: 'succeeded', providerRef: `fake_${req.paymentId}` };
+  }
+
+  async refund(req: RefundRequest): Promise<RefundResult> {
+    return { status: 'succeeded', providerRef: `fake_refund_${req.refundId}` };
   }
 
   async removeCard(): Promise<void> {}

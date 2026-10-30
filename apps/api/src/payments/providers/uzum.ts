@@ -3,7 +3,7 @@
 // Fill in from the Uzum Bank merchant documentation we receive: hosted checkout, card binding,
 // recurring charges and the server-to-server notification with its signature scheme.
 
-import type { CardInfo, ChargeRequest, ChargeResult, CheckoutRequest, CheckoutResult, PaymentLookup, PaymentProvider, WebhookOutcome, WebhookRequest } from '../types.ts';
+import type { CardInfo, ChargeRequest, ChargeResult, CheckoutRequest, CheckoutResult, PaymentLookup, PaymentProvider, WebhookOutcome, WebhookRequest, RefundRequest, RefundResult } from '../types.ts';
 import { ProviderNotConfigured } from '../types.ts';
 
 export interface UzumConfig {
@@ -28,6 +28,11 @@ export class UzumProvider implements PaymentProvider {
 
   async chargeCard(_req: ChargeRequest): Promise<ChargeResult> {
     throw new ProviderNotConfigured(this.name, 'chargeCard');
+  }
+
+  /** -> Uzum `refund` operation */
+  async refund(_req: RefundRequest): Promise<RefundResult> {
+    throw new ProviderNotConfigured(this.name, 'refund');
   }
 
   async removeCard(_token: string): Promise<void> {

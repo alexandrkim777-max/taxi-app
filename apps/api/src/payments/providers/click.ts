@@ -10,7 +10,7 @@
 //                       authenticated by sign_string = md5(click_trans_id + service_id + SECRET_KEY +
 //                       merchant_trans_id + [merchant_prepare_id] + amount + action + sign_time).
 
-import type { CardInfo, ChargeRequest, ChargeResult, CheckoutRequest, CheckoutResult, PaymentLookup, PaymentProvider, WebhookOutcome, WebhookRequest } from '../types.ts';
+import type { CardInfo, ChargeRequest, ChargeResult, CheckoutRequest, CheckoutResult, PaymentLookup, PaymentProvider, WebhookOutcome, WebhookRequest, RefundRequest, RefundResult } from '../types.ts';
 import { ProviderNotConfigured } from '../types.ts';
 
 export interface ClickConfig {
@@ -37,6 +37,11 @@ export class ClickProvider implements PaymentProvider {
 
   async chargeCard(_req: ChargeRequest): Promise<ChargeResult> {
     throw new ProviderNotConfigured(this.name, 'chargeCard');
+  }
+
+  /** -> Click `payment/reversal` (partial: check the merchant contract) */
+  async refund(_req: RefundRequest): Promise<RefundResult> {
+    throw new ProviderNotConfigured(this.name, 'refund');
   }
 
   async removeCard(_token: string): Promise<void> {

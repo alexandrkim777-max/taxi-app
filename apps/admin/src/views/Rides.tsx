@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { api } from '../api';
 import { dateTime, phone, plate, sum } from '../format';
-import { ErrorBox, Loading, PageHead, Pill, StatusPill, Timeline, tr, useApp, useLoad } from '../ui';
+import { Action, ErrorBox, Loading, PageHead, Pill, StatusPill, Timeline, tr, useApp, useLoad } from '../ui';
 
 interface Item { id: string; status: string; priceTiyin: number | null; paymentMethod: string; createdAt: string; passengerName: string; driverName: string | null; plate: string | null }
 const STATUSES = ['created', 'accepted', 'driver_en_route', 'arrived', 'in_progress', 'completed', 'cancelled'];
@@ -61,9 +61,44 @@ interface Detail {
   dispute: { id: string; status: string; outcome: string | null } | null;
 }
 
+/**
+ * Give money back from one card payment: amount and reason, sent through the provider. One form =
+ * one idempotency key, so a double click or a lost answer never sends the money twice.
+ */
+function RefundForm({ payment, onDone }: { payment: Record<string, any>; onDone: () => void }) {
+  const { t, lang, toast } = useApp();
+  const max = Number(payment.refundable_tiyin);
+  const [open, setOpen] = useState(false);
+  const [amount, setAmount] = useState(String(max / 100));
+  const [reason, setReason] = useState('');
+  const [key] = useState(() => crypto.randomUUID());
+  const tiyin = Math.round(Number(amount.replace(/\s/g, '').replace(',', '.')) * 100);
+  const valid = Number.isFinite(tiyin) && tiyin >= 100 && tiyin <= max && reason.trim().length >= 5;
+  if (!open) return <button type="button" className="btn small" onClick={() => setOpen(true)}>{t.refund}</button>;
+  return (
+    <div className="stack" style={{ width: '100%' }}>
+      <label className="field"><span>{t.refundAmount} ({t.upTo} {sum(max, lang)})</span>
+        <input inputMode="decimal" value={amount} onChange={(e) => setAmount(e.target.value)} /></label>
+      <label className="field"><span>{t.refundReason}</span>
+        <input value={reason} maxLength={500} onChange={(e) => setReason(e.target.value)} /></label>
+      <div className="line">
+        <Action kind="danger" small disabled={!valid} onRun={async () => {
+          const res = await api<{ status: string }>(`/admin/payments/${payment.id}/refund`, {
+            body: { amountTiyin: tiyin, reason: reason.trim() }, headers: { 'idempotency-key': key },
+          });
+          toast(res.status === 'failed' ? t.refundFailed : t.refundSent);
+          setOpen(false);
+          onDone();
+        }}>{t.refundConfirm} {Number.isFinite(tiyin) ? sum(tiyin, lang) : ''}</Action>
+        <button type="button" className="btn small" onClick={() => setOpen(false)}>{t.cancel}</button>
+      </div>
+    </div>
+  );
+}
+
 export function RideDetail({ id }: { id: string }) {
-  const { t, lang, go } = useApp();
-  const { data, error, loading } = useLoad(() => api<Detail>(`/admin/rides/${id}`), [id]);
+  const { t, lang, go, isAdmin } = useApp();
+  const { data, error, loading, reload } = useLoad(() => api<Detail>(`/admin/rides/${id}`), [id]);
   const { label } = tr(lang);
   if (loading && !data) return <Loading />;
   if (error || !data) return <ErrorBox text={error ?? ''} />;
@@ -99,7 +134,13 @@ export function RideDetail({ id }: { id: string }) {
         <div className="stack">
           <div className="card stack"><h2>{t.payments}</h2>
             {data.payments.length === 0 ? <span className="muted">—</span> : data.payments.map((p) => (
-              <div key={p.id} className="line between"><span>{label(p.type)} · {p.provider}</span><span className="line num">{sum(Number(p.amount_tiyin), lang)} <StatusPill status={p.status} /></span></div>
+              <div key={p.id} className="stack" style={{ gap: 4 }}>
+                <div className="line between"><span>{label(p.type)} · {p.provider}</span><span className="line num">{p.type === 'refund' ? '−' : ''}{sum(Number(p.amount_tiyin), lang)} <StatusPill status={p.status} /></span></div>
+                {p.type === 'refund' && <span className="muted">
+                  {p.refund_kind === 'overpaid' ? t.refundOverpaid : `${p.refund_reason ?? ''} · ${p.approved_by_name ?? phone(p.approved_by_phone)}`}
+                  {p.failure_reason ? ` · ${p.failure_reason}` : ''}</span>}
+                {isAdmin && Number(p.refundable_tiyin) > 0 && <RefundForm payment={p} onDone={reload} />}
+              </div>
             ))}
           </div>
           <div className="card stack"><h2>{t.ratings}</h2>

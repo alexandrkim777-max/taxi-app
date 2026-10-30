@@ -42,13 +42,20 @@ export const RECONCILE_AFTER_SEC = 120;
  * process died between saving 'completed' and calling the provider) would otherwise be neither
  * paid nor a debt. Charges what is still due; a decline turns it into a debt as usual. Rides with
  * a charge already sent to the provider and awaiting its answer are left to the webhook.
+ * It also retries over-payment refunds that failed (provider down).
  */
 export async function reconcileTick(db: pg.Pool, payments: PaymentService): Promise<number> {
   const { rows } = await db.query<{ id: string }>(
     `SELECT r.id FROM rides r
       WHERE r.status = 'completed' AND r.payment_method = 'card'
-        AND r.locked_price_tiyin > r.paid_tiyin
-        AND r.payment_status IS DISTINCT FROM 'failed'
+        AND (
+          -- Charged too little: never charged (crash), unless it already failed and became a debt.
+          (r.locked_price_tiyin > r.paid_tiyin AND r.payment_status IS DISTINCT FROM 'failed')
+          -- Charged too much: the over-payment refund has not gone through yet.
+          OR (r.paid_tiyin > r.locked_price_tiyin
+              AND NOT EXISTS (SELECT 1 FROM payments x WHERE x.ride_id = r.id AND x.type = 'refund'
+                                AND x.refund_kind = 'overpaid' AND x.status = 'pending'))
+        )
         AND EXISTS (SELECT 1 FROM ride_events e WHERE e.ride_id = r.id AND e.type = 'status:completed'
                      AND e.at < now() - make_interval(secs => $1))
         AND NOT EXISTS (SELECT 1 FROM payments p WHERE p.ride_id = r.id AND p.type = 'ride'

@@ -28,11 +28,30 @@ interface PaymentRow {
   status: string;
   amount_tiyin: string;
   provider: ProviderName;
+  provider_ref: string | null;
   ride_id: string | null;
   driver_id: string | null;
   plan_id: string | null;
   payer_user_id: string | null;
+  card_id: string | null;
+  refund_of: string | null;
+  refund_kind: 'overpaid' | 'moderator' | null;
 }
+
+export interface RefundOrder {
+  /** The successful payment the money goes back from. */
+  paymentId: string;
+  amountTiyin: number;
+  kind: 'overpaid' | 'moderator';
+  reason: string;
+  /** The staff member who decided (moderator refunds); null for automatic ones. */
+  approvedBy: string | null;
+  /** Same key = same refund: a double click or a retry never sends money twice. */
+  key: string;
+}
+
+/** Only money taken from a card through a provider can go back through it. */
+const REFUNDABLE_TYPES = ['ride', 'cancel_fee'];
 
 export class PaymentService {
   readonly db: pg.Pool;
@@ -130,6 +149,108 @@ export class PaymentService {
     }
     if (p.type === 'cancel_fee' && p.ride_id && status === 'succeeded') {
       await tx.query(`UPDATE rides SET cancel_fee_status = 'paid' WHERE id = $1 AND cancel_fee_status = 'pending'`, [p.ride_id]);
+    }
+    if (p.type === 'refund' && p.ride_id && status === 'succeeded') {
+      if (p.refund_kind === 'overpaid') {
+        // The fare itself was corrected: what the passenger paid comes down to the final price.
+        await tx.query(`UPDATE rides SET paid_tiyin = paid_tiyin - $2 WHERE id = $1`, [p.ride_id, p.amount_tiyin]);
+      } else {
+        await tx.query(`UPDATE rides SET refunded_tiyin = refunded_tiyin + $2 WHERE id = $1`, [p.ride_id, p.amount_tiyin]);
+        // A cancellation fee given back in full no longer stands.
+        await tx.query(
+          `UPDATE rides r SET cancel_fee_status = 'waived'
+             FROM payments o
+            WHERE r.id = $1 AND o.id = $2 AND o.type = 'cancel_fee' AND o.ride_id = r.id
+              AND (SELECT coalesce(sum(x.amount_tiyin), 0) FROM payments x
+                    WHERE x.refund_of = o.id AND x.status = 'succeeded') >= o.amount_tiyin`,
+          [p.ride_id, p.refund_of],
+        );
+      }
+    }
+  }
+
+  /**
+   * Sends money back from a successful card payment, through the provider that took it.
+   * - Never more than was paid: refunds already sent or on their way count against the payment,
+   *   checked under a row lock, so two staff members clicking at once cannot both refund it all.
+   * - One key, one refund: a repeat returns the same refund; a failed one can be tried again.
+   * - The provider's answer is applied exactly once (settle), like any payment.
+   */
+  async refund(order: RefundOrder): Promise<{ refundId: string; status: 'succeeded' | 'pending' | 'failed' }> {
+    const lock = await this.db.connect();
+    try {
+      await lock.query('SELECT pg_advisory_lock(hashtext($1))', [order.key]);
+      const prepared = await withTx(this.db, async (tx) => {
+        const { rows } = await tx.query<PaymentRow>(`SELECT * FROM payments WHERE id = $1 FOR UPDATE`, [order.paymentId]);
+        const original = rows[0];
+        if (!original) throw new HttpError(404, 'not_found');
+        if (!REFUNDABLE_TYPES.includes(original.type) || original.status !== 'succeeded' || !original.provider_ref) {
+          throw new HttpError(409, 'not_refundable');
+        }
+        const existing = await tx.query<{ id: string; status: string; provider_ref: string | null; refund_of: string; amount_tiyin: string }>(
+          `SELECT id, status, provider_ref, refund_of, amount_tiyin FROM payments WHERE idempotency_key = $1`, [order.key],
+        );
+        const again = existing.rows[0];
+        if (again && (again.refund_of !== original.id || Number(again.amount_tiyin) !== order.amountTiyin)) {
+          throw new HttpError(409, 'idempotency_key_reused');
+        }
+        if (again && again.status === 'succeeded') return { done: { refundId: again.id, status: 'succeeded' as const } };
+        if (again && again.status === 'pending' && again.provider_ref) return { done: { refundId: again.id, status: 'pending' as const } };
+
+        const { rows: [sums] } = await tx.query<{ refunded: string }>(
+          `SELECT coalesce(sum(amount_tiyin), 0) AS refunded FROM payments
+            WHERE refund_of = $1 AND status IN ('pending', 'succeeded') AND id IS DISTINCT FROM $2`,
+          [original.id, again?.id ?? null],
+        );
+        const available = Number(original.amount_tiyin) - Number(sums!.refunded);
+        if (order.amountTiyin > available) throw new HttpError(409, 'refund_exceeds_payment', { availableTiyin: available });
+
+        let refundId: string;
+        if (again) {
+          // An earlier attempt failed (or died before reaching the provider): try again.
+          await tx.query(`UPDATE payments SET status = 'pending', provider_ref = NULL, failure_reason = NULL, updated_at = now() WHERE id = $1`, [again.id]);
+          refundId = again.id;
+        } else {
+          const ins = await tx.query<{ id: string }>(
+            `INSERT INTO payments (type, amount_tiyin, provider, status, ride_id, payer_user_id, driver_id, card_id,
+                                   idempotency_key, refund_of, refund_kind, refund_reason, approved_by)
+             VALUES ('refund', $1, $2, 'pending', $3, $4, $5, $6, $7, $8, $9, $10, $11)
+             RETURNING id`,
+            [order.amountTiyin, original.provider, original.ride_id, original.payer_user_id, original.driver_id, original.card_id,
+             order.key, original.id, order.kind, order.reason, order.approvedBy],
+          );
+          refundId = ins.rows[0]!.id;
+        }
+        return { send: { refundId, provider: original.provider, originalProviderRef: original.provider_ref, originalId: original.id } };
+      });
+      if ('done' in prepared) return prepared.done!;
+      const job = prepared.send!;
+
+      let result;
+      try {
+        result = await this.provider(job.provider).refund({
+          refundId: job.refundId, originalPaymentId: job.originalId, originalProviderRef: job.originalProviderRef,
+          amountTiyin: order.amountTiyin, reason: order.reason,
+        });
+      } catch (err) {
+        this.log.error({ err, refundId: job.refundId }, 'refund error');
+        result = { status: 'failed' as const, reason: 'provider_error' };
+      }
+      if (result.status === 'pending') {
+        await this.db.query(`UPDATE payments SET provider_ref = $2 WHERE id = $1`, [job.refundId, result.providerRef]);
+        return { refundId: job.refundId, status: 'pending' };
+      }
+      await this.settle({
+        paymentId: job.refundId,
+        providerRef: result.providerRef ?? `failed:${job.refundId}:${Date.now()}`,
+        amountTiyin: order.amountTiyin,
+        status: result.status,
+        reason: result.status === 'failed' ? result.reason : undefined,
+      });
+      return { refundId: job.refundId, status: result.status };
+    } finally {
+      await lock.query('SELECT pg_advisory_unlock(hashtext($1))', [order.key]).catch(() => {});
+      lock.release();
     }
   }
 
@@ -236,15 +357,36 @@ export class PaymentService {
     if (!r) return 'nothing_due';
     const due = Number(r.due);
     if (due < 0) {
-      // TODO(refunds): send to the provider once refunds are implemented.
-      await this.db.query(
-        `INSERT INTO payments (type, amount_tiyin, provider, status, ride_id, payer_user_id, idempotency_key)
-         SELECT 'refund', $2, coalesce(c.provider, 'manual'), 'pending', $1, $3, 'refund:' || $1
-           FROM rides ri LEFT JOIN payment_cards c ON c.id = ri.card_id WHERE ri.id = $1
-         ON CONFLICT (idempotency_key) WHERE idempotency_key IS NOT NULL DO NOTHING`,
-        [rideId, -due, r.passenger_id],
+      // Paid more than the final fare (the route got shorter after the 60% charge): the difference
+      // goes back to the card at once, from the ride's card payments, largest first.
+      // A refund already on its way (waiting for the provider) covers it; failed ones are retried.
+      const waiting = await this.db.query(
+        `SELECT 1 FROM payments WHERE ride_id = $1 AND type = 'refund' AND refund_kind = 'overpaid' AND status = 'pending' LIMIT 1`,
+        [rideId],
       );
-      await this.db.query(`UPDATE rides SET payment_status = 'paid' WHERE id = $1`, [rideId]);
+      if (waiting.rowCount) return 'nothing_due';
+      let left = -due;
+      const { rows: paidFrom } = await this.db.query<{ id: string; available: string }>(
+        `SELECT p.id, p.amount_tiyin - coalesce((SELECT sum(x.amount_tiyin) FROM payments x
+                                                  WHERE x.refund_of = p.id AND x.status IN ('pending', 'succeeded')), 0) AS available
+           FROM payments p
+          WHERE p.ride_id = $1 AND p.type = 'ride' AND p.status = 'succeeded' AND p.provider_ref IS NOT NULL
+          ORDER BY p.amount_tiyin DESC`,
+        [rideId],
+      );
+      let anyFailed = false;
+      for (const p of paidFrom) {
+        const amount = Math.min(left, Number(p.available));
+        if (amount <= 0) continue;
+        const res = await this.refund({
+          paymentId: p.id, amountTiyin: amount, kind: 'overpaid', reason: 'route_shorter', approvedBy: null,
+          key: `refund:overpaid:${rideId}:${r.paid}:${p.id}`,
+        });
+        if (res.status === 'failed') anyFailed = true;
+        left -= amount;
+        if (left <= 0) break;
+      }
+      if (anyFailed) this.log.error({ rideId }, 'over-payment refund failed; reconcileTick retries it');
       return 'nothing_due';
     }
     if (due === 0) return 'nothing_due';

@@ -21,6 +21,7 @@ import { complaintRoutes } from './complaints/routes.ts';
 import { adminPeopleRoutes } from './admin/people.ts';
 import { adminPricingRoutes } from './admin/pricing.ts';
 import { adminOpsRoutes } from './admin/ops.ts';
+import { adminRefundRoutes } from './admin/refunds.ts';
 import type { PaymentService } from './payments/service.ts';
 import type { ProviderName } from './payments/types.ts';
 import { setFileService, type FileService } from './files/index.ts';
@@ -107,6 +108,7 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
   await app.register(adminPeopleRoutes, { db: deps.db, cityCode: deps.cityCode });
   await app.register(adminPricingRoutes, { db: deps.db, cityCode: deps.cityCode });
   await app.register(adminOpsRoutes, { db: deps.db, cityCode: deps.cityCode });
+  await app.register(adminRefundRoutes, { db: deps.db, payments: deps.payments });
   await app.register(paymentRoutes, {
     payments: deps.payments,
     cityCode: deps.cityCode,

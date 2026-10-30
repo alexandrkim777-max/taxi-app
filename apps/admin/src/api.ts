@@ -24,7 +24,7 @@ export class ApiError extends Error {
 let onSignedOut: (() => void) | null = null;
 export function setSignedOutHandler(cb: (() => void) | null): void { onSignedOut = cb; }
 
-export async function api<T = unknown>(path: string, opts: { method?: string; body?: unknown } = {}): Promise<T> {
+export async function api<T = unknown>(path: string, opts: { method?: string; body?: unknown; headers?: Record<string, string> } = {}): Promise<T> {
   const method = opts.method ?? (opts.body === undefined ? 'GET' : 'POST');
   if (DEMO) {
     const res = await mockApi(method, path, opts.body);
@@ -37,6 +37,7 @@ export async function api<T = unknown>(path: string, opts: { method?: string; bo
     headers: {
       'x-requested-with': 'taxi-admin',
       ...(opts.body === undefined ? {} : { 'content-type': 'application/json' }),
+      ...opts.headers,
     },
     body: opts.body === undefined ? undefined : JSON.stringify(opts.body),
   });

@@ -123,7 +123,16 @@ export async function adminOpsRoutes(app: FastifyInstance, { db, cityCode }: Dep
         db.query(`SELECT position, ST_Y(point::geometry) AS lat, ST_X(point::geometry) AS lng, address FROM ride_stops WHERE ride_id = $1 ORDER BY position`, [id]),
         db.query(`SELECT type, actor, payload, at FROM ride_events WHERE ride_id = $1 ORDER BY id`, [id]),
         db.query(`SELECT reason, old_price_tiyin, new_price_tiyin, wait_paid_min, created_at FROM price_changes WHERE ride_id = $1 ORDER BY created_at`, [id]),
-        db.query(`SELECT id, type, status, amount_tiyin, provider, failure_reason, paid_at, created_at FROM payments WHERE ride_id = $1 ORDER BY created_at`, [id]),
+        db.query(
+          `SELECT p.id, p.type, p.status, p.amount_tiyin, p.provider, p.failure_reason, p.paid_at, p.created_at,
+                  p.refund_of, p.refund_kind, p.refund_reason, ap.name AS approved_by_name, ap.phone AS approved_by_phone,
+                  -- What can still be given back from this payment (card payments that went through).
+                  CASE WHEN p.type IN ('ride', 'cancel_fee') AND p.status = 'succeeded' AND p.provider_ref IS NOT NULL
+                       THEN (p.amount_tiyin - coalesce((SELECT sum(x.amount_tiyin) FROM payments x
+                                                         WHERE x.refund_of = p.id AND x.status IN ('pending', 'succeeded')), 0))::int
+                  END AS refundable_tiyin
+             FROM payments p LEFT JOIN users ap ON ap.id = p.approved_by
+            WHERE p.ride_id = $1 ORDER BY p.created_at`, [id]),
         db.query(`SELECT from_user, to_user, score, tags, reason FROM ratings WHERE ride_id = $1`, [id]),
         db.query(`SELECT id, type, severity, status FROM complaints WHERE ride_id = $1`, [id]),
         db.query(`SELECT id, status, outcome FROM disputes WHERE ride_id = $1`, [id]),
@@ -137,7 +146,7 @@ export async function adminOpsRoutes(app: FastifyInstance, { db, cityCode }: Dep
     },
   );
 
-  // Money overview: subscription revenue, card money passing through, debts, refunds to send.
+  // Money overview: subscription revenue, card money passing through, debts, refunds in flight or failed.
   app.get<{ Querystring: { days?: number } }>(
     '/admin/finance',
     {
@@ -162,9 +171,13 @@ export async function adminOpsRoutes(app: FastifyInstance, { db, cityCode }: Dep
                 coalesce(sum(cancel_fee_tiyin) FILTER (WHERE cancel_fee_status = 'pending'), 0)::bigint AS "unpaidCancelFeesTiyin"
            FROM rides`,
       );
+      // Refunds still waiting for the provider, or failed and needing someone to look.
       const { rows: refunds } = await db.query(
-        `SELECT id, ride_id AS "rideId", amount_tiyin::int AS "amountTiyin", created_at AS "createdAt"
-           FROM payments WHERE type = 'refund' AND status = 'pending' ORDER BY created_at LIMIT 100`,
+        `SELECT id, ride_id AS "rideId", amount_tiyin::int AS "amountTiyin", created_at AS "createdAt",
+                status, refund_kind AS kind, refund_reason AS reason, failure_reason AS "failureReason"
+           FROM payments
+          WHERE type = 'refund' AND (status = 'pending' OR (status = 'failed' AND created_at > now() - interval '30 days'))
+          ORDER BY created_at LIMIT 100`,
       );
       await audit(db, request, 'finance_viewed', null, { days });
       return { days, payments: byType, debts, refundsPending: refunds };
